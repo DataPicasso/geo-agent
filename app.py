@@ -232,19 +232,18 @@ if st.sidebar.button("Generar asignación"):
 
 if st.session_state.resultado:
     st.subheader("Filtro de Agente")
-    # Opciones: "Todos" o agentes 1 a num_agents
-    filtro_opciones = ["Todos"] + [str(i) for i in range(1, num_agents+1)]
+    # Opciones: "Todos" o agentes de las claves en session_state.assignments
+    filtro_opciones = ["Todos"] + [str(i) for i in st.session_state.assignments.keys()]
     agente_filtrar = st.sidebar.selectbox("Filtrar por agente:", options=filtro_opciones, key="agent_filter")
     
-    # Filtrado seguro usando get() en session_state
     if agente_filtrar != "Todos":
         agente_seleccionado = int(agente_filtrar)
-        assignments_filtradas = { agente_seleccionado: st.session_state.get("assignments", {}).get(agente_seleccionado, []) }
+        assignments_filtradas = { agente_seleccionado: st.session_state.assignments[agente_seleccionado] }
     else:
-        assignments_filtradas = st.session_state.get("assignments", {})
+        assignments_filtradas = st.session_state.assignments
     
     # Regenera el mapa según el filtro
-    mapa_filtrado = create_map(assignments_filtradas, mode, provincia, ciudad, st.session_state.get("agent_colors", {}))
+    mapa_filtrado = create_map(assignments_filtradas, mode, provincia, ciudad, st.session_state.agent_colors)
     
     st.subheader("Mapa de asignaciones")
     mapa_html = mapa_filtrado._repr_html_()
