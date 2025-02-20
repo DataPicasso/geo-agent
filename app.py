@@ -120,9 +120,11 @@ def get_provincias():
     return sorted(list(set(provincias)))
 
 def get_ciudades(provincia):
+    # Se asegura que la provincia esté dentro de la República Dominicana
     query = f"""
     [out:json];
-    area["name"="{provincia}"]->.province;
+    area["name"="República Dominicana"]->.country;
+    area["name"="{provincia}"](area.country)->.province;
     node(area.province)["place"~"^(city|town|village)$"];
     out;
     """
@@ -410,9 +412,6 @@ if st.session_state.resultado:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
-        # -------------------------------
-        # Calendario de Visitas
-        # -------------------------------
         with st.expander("Calendario de Visitas"):
             st.write("Configura el calendario de visitas:")
             start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("today"))
