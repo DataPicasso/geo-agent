@@ -154,7 +154,7 @@ def get_urbanizaciones(provincia, ciudad):
     url = "http://overpass-api.de/api/interpreter"
     response = requests.post(url, data={'data': query})
     if response.status_code != 200:
-        st.error("Error al consultar las urbanizaciones en Overpass API")
+        st.error("Error al consultar urbanizaciones en Overpass API")
         return []
     data = response.json()
     urbanizaciones = []
@@ -375,7 +375,7 @@ if provincias:
 else:
     provincia = None
 
-# Filtro: Ciudad (para uso en la consulta tradicional)
+# Filtro: Ciudad
 ciudades = get_ciudades(provincia) if provincia else []
 if ciudades:
     if "ciudad" not in st.session_state or st.session_state.ciudad not in ciudades:
@@ -386,7 +386,7 @@ if ciudades:
 else:
     ciudad = None
 
-# Filtro: Urbanización (Sección/Barrio/Paraje) basado en el tag addr:suburb
+# Filtro: Urbanización (Sección/Barrio/Paraje)
 urbanizaciones = get_urbanizaciones(provincia, ciudad) if (provincia and ciudad) else []
 if urbanizaciones:
     if "urbanizacion" not in st.session_state or st.session_state.urbanizacion not in urbanizaciones:
