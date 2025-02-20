@@ -83,29 +83,8 @@ st.markdown(
 
 # -------------------------------
 # Funciones para obtener divisiones administrativas desde Overpass API
-# (Para Municipios y Distritos se mantienen las funciones originales)
+# (Se mantienen las funciones para Municipio y Distrito)
 # -------------------------------
-def get_provincias():
-    # En este caso la lista de provincias se obtiene del Excel, por lo que esta función ya no se utiliza para el listado
-    query = """
-    [out:json];
-    area["name"="República Dominicana"]->.country;
-    rel(area.country)["admin_level"="4"]["boundary"="administrative"];
-    out tags;
-    """
-    url = "http://overpass-api.de/api/interpreter"
-    response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
-        st.error("Error al consultar las provincias en Overpass API")
-        return []
-    data = response.json()
-    provincias = []
-    for element in data.get("elements", []):
-        name = element.get("tags", {}).get("name")
-        if name:
-            provincias.append(name)
-    return sorted(list(set(provincias)))
-
 def get_municipios(provincia):
     query = f"""
     [out:json];
@@ -185,7 +164,7 @@ def filter_feature(geojson_data, value):
                 return feature
     return None
 
-def get_boundary(selected_region, selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio):
+def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio):
     boundary = None
     # Si se seleccionó Barrio, usar su GeoJSON
     if selected_barrio and selected_barrio != "Todos":
@@ -217,10 +196,6 @@ def get_boundary(selected_region, selected_prov, selected_muni, selected_dist, s
     return boundary
 
 def get_province_boundary(provincia):
-    """
-    Consulta Overpass API para obtener la demarcación (geometry) de la provincia.
-    Se utiliza una consulta que retorna el primer elemento con boundary administrativo (admin_level=4).
-    """
     query = f"""
     [out:json][timeout:25];
     area["name"="República Dominicana"]->.country;
@@ -455,8 +430,7 @@ def load_division_excel():
 
 df_division = load_division_excel()
 
-# Crear listas únicas para cada nivel a partir del Excel
-regiones = sorted(df_division["Región"].dropna().unique().tolist()) if "Región" in df_division.columns else []
+# Crear listas únicas para cada nivel a partir del Excel (se eliminó Región)
 provincias = sorted(df_division["Provincia"].dropna().unique().tolist()) if "Provincia" in df_division.columns else []
 municipios = sorted(df_division["Municipio"].dropna().unique().tolist()) if "Municipio" in df_division.columns else []
 distritos = sorted(df_division["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_division.columns else []
@@ -471,12 +445,11 @@ st.markdown("Esta aplicación utiliza los límites administrativos definidos en 
 
 st.sidebar.header("Configuración de Filtros Dinámicos")
 
-selected_region = st.sidebar.selectbox("Seleccione la Región:", ["Todos"] + regiones, index=0)
-selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias, index=0)
-selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios, index=0)
-selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos, index=0)
-selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones, index=0)
-selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios, index=0)
+selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias, index=0, key="provincia", on_change=update_provincia)
+selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios, index=0, key="municipio", on_change=update_municipio)
+selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos, index=0, key="distrito")
+selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones, index=0, key="seccion")
+selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios, index=0, key="barrio")
 
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
@@ -488,7 +461,7 @@ if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
 if st.sidebar.button("Generar asignación"):
-    boundary = get_boundary(selected_region, selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
+    boundary = get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
     if not boundary:
         st.error("No se pudo obtener el perímetro de la división seleccionada. Verifica los filtros.")
     else:
