@@ -225,6 +225,9 @@ def get_province_boundary(provincia):
     return None
 
 def build_overpass_query_polygon(geometry):
+    # Si la geometría es un MultiPolygon, extraemos el primer polígono
+    if geometry["type"] == "MultiPolygon":
+        geometry = {"type": "Polygon", "coordinates": geometry["coordinates"][0]}
     if geometry["type"] != "Polygon":
         st.error("La geometría no es un polígono válido para la consulta.")
         return ""
@@ -431,11 +434,9 @@ def load_division_excel():
 df_division = load_division_excel()
 
 # Crear listas dinámicas para cada nivel (cascada) a partir del Excel
-# Provincia: se obtiene de todo el Excel
 provincias_all = sorted(df_division["Provincia"].dropna().unique().tolist()) if "Provincia" in df_division.columns else []
 selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias_all, index=0, key="provincia", on_change=update_provincia)
 
-# Municipio: filtrar por Provincia
 if selected_prov != "Todos":
     df_prov = df_division[df_division["Provincia"] == selected_prov]
 else:
@@ -443,7 +444,6 @@ else:
 municipios_all = sorted(df_prov["Municipio"].dropna().unique().tolist()) if "Municipio" in df_prov.columns else []
 selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios_all, index=0, key="municipio", on_change=update_municipio)
 
-# Distrito Municipal: filtrar por Provincia y Municipio
 if selected_prov != "Todos" and selected_muni != "Todos":
     df_muni = df_prov[df_prov["Municipio"] == selected_muni]
 else:
@@ -451,7 +451,6 @@ else:
 distritos_all = sorted(df_muni["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_muni.columns else []
 selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos_all, index=0, key="distrito")
 
-# Sección: filtrar por Provincia, Municipio y Distrito
 if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos":
     df_dist = df_muni[df_muni["Distrito Municipal"] == selected_dist]
 else:
@@ -459,7 +458,6 @@ else:
 secciones_all = sorted(df_dist["Sección"].dropna().unique().tolist()) if "Sección" in df_dist.columns else []
 selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones_all, index=0, key="seccion")
 
-# Barrio: filtrar por Provincia, Municipio, Distrito y Sección
 if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" and selected_secc != "Todos":
     df_secc = df_dist[df_dist["Sección"] == selected_secc]
 else:
