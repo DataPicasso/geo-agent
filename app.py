@@ -10,9 +10,70 @@ from geopy.distance import geodesic
 import numpy as np
 
 # -------------------------------
+# Estilos personalizados (grises y azul)
+# -------------------------------
+st.markdown(
+    """
+    <style>
+    /* Fondo general y tipografía */
+    body, .stApp {
+        background-color: #f2f2f2;
+        color: #333333;
+        font-family: Arial, sans-serif;
+    }
+    
+    /* Estilos de la barra lateral */
+    .css-1d391kg { 
+        background-color: #e6e6e6;
+    }
+    .sidebar .sidebar-content {
+        background-color: #e6e6e6;
+    }
+    
+    /* Estilos para botones */
+    .stButton>button, .stDownloadButton>button {
+        background-color: #004c99 !important;
+        color: white !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-size: 16px !important;
+        font-weight: bold !important;
+        padding: 10px 16px !important;
+    }
+    .stButton>button:hover, .stDownloadButton>button:hover {
+        background-color: #003366 !important;
+    }
+    
+    /* Encabezados */
+    h1, h2, h3, h4, h5, h6 {
+        color: #004c99;
+    }
+    
+    /* Estilos para tablas y dataframes */
+    .css-1lcbmhc {
+        background-color: #ffffff;
+    }
+    
+    /* Pie de página */
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: #d9d9d9;
+        text-align: center;
+        padding: 10px;
+        font-size: 14px;
+        color: #333333;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# -------------------------------
 # Funciones para obtener provincias y ciudades dinámicamente desde Overpass API
 # -------------------------------
-
 def get_provincias():
     query = """
     [out:json];
@@ -56,7 +117,6 @@ def get_ciudades(provincia):
 # -------------------------------
 # Funciones para generar calles y asignación optimizada
 # -------------------------------
-
 def build_overpass_query(provincia, ciudad):
     query = f"""
     [out:json][timeout:25];
@@ -146,7 +206,7 @@ def generate_agent_colors(num_agents):
     return colors
 
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
-    # Inicia el mapa centrado en la República Dominicana (ubicación fija) con zoom_start=8.
+    # Se inicia el mapa centrado en la República Dominicana con zoom_start=8.
     m = folium.Map(location=[19.0, -70.0], zoom_start=8, tiles="cartodbpositron")
     for agent, streets in assignments.items():
         streets_ordered = reorder_cluster(streets.copy())
@@ -217,17 +277,16 @@ def generate_dataframe(assignments, provincia, ciudad):
 # -------------------------------
 def generate_schedule(df, num_weeks, working_days, start_date):
     """
-    Genera un calendario de visitas para cada agente. Para cada agente se reparte la ruta (ordenada)
-    entre los días laborales disponibles durante el número de semanas indicadas.
+    Genera un calendario de visitas para cada agente.
+    Se asume una jornada laboral normal con los días seleccionados.
+    Divide las calles asignadas (ordenadas) entre los días disponibles.
     """
     # Mapeo de días en inglés a números (Monday=0, ..., Sunday=6)
     weekday_map = {"Monday":0, "Tuesday":1, "Wednesday":2, "Thursday":3, "Friday":4, "Saturday":5, "Sunday":6}
     working_day_numbers = [weekday_map[day] for day in working_days]
     
-    # Genera una lista de fechas laborales a partir del start_date
     working_dates = []
     current_date = pd.to_datetime(start_date)
-    # Calcula la cantidad total de días laborales necesarios
     total_days = num_weeks * len(working_days)
     while len(working_dates) < total_days:
         if current_date.weekday() in working_day_numbers:
@@ -235,10 +294,9 @@ def generate_schedule(df, num_weeks, working_days, start_date):
         current_date += pd.Timedelta(days=1)
     
     schedule = {}
-    # Para cada agente, divide las visitas (calles) en los días disponibles de forma equitativa.
+    # Para cada agente, divide la ruta (ordenada) entre los días disponibles.
     for agent in sorted(df["Agente"].unique()):
         agent_df = df[df["Agente"] == agent].sort_values("Order") if "Order" in df.columns else df[df["Agente"] == agent]
-        n = len(agent_df)
         groups = np.array_split(agent_df, total_days)
         schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} 
                            for date, group in zip(working_dates, groups)]
@@ -253,7 +311,6 @@ def update_provincia():
 # -------------------------------
 # Interfaz en Streamlit
 # -------------------------------
-
 st.title("Asignación de Calles a Agentes en República Dominicana")
 st.sidebar.header("Configuración")
 
@@ -283,7 +340,7 @@ mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
-# Al generar la asignación se guardan 'assignments' y 'agent_colors' en session_state
+# Generación de asignación y rutas
 if st.sidebar.button("Generar asignación"):
     with st.spinner("Consultando Overpass API para obtener calles..."):
         streets = get_streets(provincia, ciudad)
@@ -292,15 +349,12 @@ if st.sidebar.button("Generar asignación"):
         agent_colors = generate_agent_colors(num_agents)
         mapa = create_map(assignments, mode, provincia, ciudad, agent_colors)
         df = generate_dataframe(assignments, provincia, ciudad)
-        # Agregamos la columna de orden de visita para el calendario si es posible
-        # Se asume que el reordenamiento dentro de cada cluster es la ruta óptima
-        # Para ello, podemos asignar la columna "Order" en función del orden en cada cluster.
+        # Se asigna el orden de visita basado en el reordenamiento (1-indexado)
         order_list = []
         for agent, streets in assignments.items():
             streets_ordered = reorder_cluster(streets.copy())
             for i, street in enumerate(streets_ordered):
                 order_list.append(i+1)
-        # Si la longitud coincide, agregamos la columna (esto es opcional)
         if len(order_list) == len(df):
             df["Order"] = order_list
         st.session_state.resultado = {"mapa": mapa, "dataframe": df}
@@ -351,13 +405,9 @@ if st.session_state.resultado:
                                           options=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
                                           default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
             if working_days:
-                # Generamos el calendario usando el DataFrame generado
                 schedule = generate_schedule(st.session_state.resultado["dataframe"], num_weeks, working_days, start_date)
-                # Permite seleccionar el agente para ver su calendario
-                agente_calendario = st.selectbox("Selecciona el agente para ver su calendario:", 
-                                                 options=sorted(schedule.keys()))
+                agente_calendario = st.selectbox("Selecciona el agente para ver su calendario:", options=sorted(schedule.keys()))
                 st.write(f"### Calendario para el Agente {agente_calendario}")
-                # Mostramos el calendario en una tabla
                 schedule_df = pd.DataFrame(schedule[agente_calendario])
                 st.dataframe(schedule_df)
             else:
@@ -366,3 +416,26 @@ if st.session_state.resultado:
         st.warning("No se encontraron datos de calles para exportar.")
 else:
     st.info("Realice la solicitud de asignación para ver resultados.")
+
+# -------------------------------
+# Pie de página
+# -------------------------------
+footer = """
+<style>
+.footer {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background-color: #d9d9d9;
+    text-align: center;
+    padding: 10px;
+    font-size: 14px;
+    color: #333333;
+}
+</style>
+<div class="footer">
+    Creado por Pedro Miguel Figueroa Domínguez
+</div>
+"""
+st.markdown(footer, unsafe_allow_html=True)
