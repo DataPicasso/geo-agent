@@ -8,7 +8,7 @@ from io import BytesIO  # Para el manejo del Excel en memoria
 from sklearn.cluster import KMeans
 from geopy.distance import geodesic
 import numpy as np
-from pyproj import Transformer  # Para transformar coordenadas
+from pyproj import Transformer
 
 # -------------------------------
 # Estilos personalizados (tema oscuro)
@@ -84,7 +84,7 @@ st.markdown(
 
 # -------------------------------
 # Funciones para obtener divisiones administrativas desde Overpass API
-# (Se mantienen las funciones para Municipio y Distrito)
+# (Para Municipio y Distrito)
 # -------------------------------
 def get_municipios(provincia):
     query = f"""
@@ -96,15 +96,8 @@ def get_municipios(provincia):
     """
     url = "http://overpass-api.de/api/interpreter"
     response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
-        st.error("Error al consultar los municipios en Overpass API")
-        return []
     data = response.json()
-    municipios = []
-    for element in data.get("elements", []):
-        name = element.get("tags", {}).get("name")
-        if name:
-            municipios.append(name)
+    municipios = [element.get("tags", {}).get("name") for element in data.get("elements", []) if element.get("tags", {}).get("name")]
     return sorted(list(set(municipios)))
 
 def get_distritos(municipio):
@@ -119,19 +112,12 @@ def get_distritos(municipio):
     """
     url = "http://overpass-api.de/api/interpreter"
     response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
-        st.error("Error al consultar los distritos municipales en Overpass API")
-        return []
     data = response.json()
-    distritos = []
-    for element in data.get("elements", []):
-        name = element.get("tags", {}).get("name")
-        if name:
-            distritos.append(name)
+    distritos = [element.get("tags", {}).get("name") for element in data.get("elements", []) if element.get("tags", {}).get("name")]
     return sorted(list(set(distritos)))
 
 # -------------------------------
-# Constantes para GeoJSON y archivo Excel de división territorial
+# Constantes para GeoJSON y Excel
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
@@ -145,53 +131,40 @@ BARRIOS_PARAJES_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&
 # Funciones para cargar y filtrar GeoJSON
 # -------------------------------
 def load_geojson(url):
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Error al cargar GeoJSON desde: {url}")
-    except Exception as e:
-        st.error(f"Excepción al cargar GeoJSON: {e}")
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()
     return {}
 
 def filter_feature(geojson_data, value):
-    if not geojson_data.get("features"):
-        return None
-    for feature in geojson_data["features"]:
+    for feature in geojson_data.get("features", []):
         props = feature.get("properties", {})
-        if "TOPONIMIA" in props:
-            if props["TOPONIMIA"].strip().upper() == value.strip().upper():
-                return feature
+        if "TOPONIMIA" in props and props["TOPONIMIA"].strip().upper() == value.strip().upper():
+            return feature
     return None
 
 def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio):
     boundary = None
-    # Si se seleccionó Barrio, usar su GeoJSON
     if selected_barrio and selected_barrio != "Todos":
         data = load_geojson(BARRIOS_PARAJES_URL)
         feature = filter_feature(data, selected_barrio)
         if feature:
             boundary = feature.get("geometry")
-    # Si no, Sección
     if not boundary and selected_secc and selected_secc != "Todos":
         data = load_geojson(SECCION_GEOJSON_URL)
         feature = filter_feature(data, selected_secc)
         if feature:
             boundary = feature.get("geometry")
-    # Si no, Distrito Municipal
     if not boundary and selected_dist and selected_dist != "Todos":
         data = load_geojson(DISTRITO_GEOJSON_URL)
         feature = filter_feature(data, selected_dist)
         if feature:
             boundary = feature.get("geometry")
-    # Si no, Municipio
     if not boundary and selected_muni and selected_muni != "Todos":
         data = load_geojson(MUNICIPIO_GEOJSON_URL)
         feature = filter_feature(data, selected_muni)
         if feature:
             boundary = feature.get("geometry")
-    # Por último, Provincia: se obtiene la ubicación geoespacial de OSM
     if not boundary and selected_prov and selected_prov != "Todos":
         boundary = get_province_boundary(selected_prov)
     return boundary
@@ -208,40 +181,25 @@ def get_province_boundary(provincia):
     """
     url = "http://overpass-api.de/api/interpreter"
     response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
-        st.error("Error al consultar el límite de la provincia en Overpass API")
-        return None
     data = response.json()
-    if "elements" not in data or len(data["elements"]) == 0:
-        st.warning("No se encontró el límite para la provincia seleccionada.")
-        return None
-    element = data["elements"][0]
-    if "geometry" in element:
-        coords = [(pt["lon"], pt["lat"]) for pt in element["geometry"]]
-        polygon = {
-            "type": "Polygon",
-            "coordinates": [coords]
-        }
-        return polygon
+    if data.get("elements"):
+        element = data["elements"][0]
+        if "geometry" in element:
+            coords = [(pt["lon"], pt["lat"]) for pt in element["geometry"]]
+            return {"type": "Polygon", "coordinates": [coords]}
     return None
 
 def build_overpass_query_polygon(geometry):
-    # Si la geometría es un MultiPolygon, extraemos el primer polígono
     if geometry["type"] == "MultiPolygon":
-        st.write("Detectado MultiPolygon, usando el primer polígono.")
         geometry = {"type": "Polygon", "coordinates": geometry["coordinates"][0]}
     if geometry["type"] != "Polygon":
-        st.error("La geometría no es un polígono válido para la consulta.")
-        st.write("Geometría recibida:", geometry)
         return ""
-    # Transformamos las coordenadas de EPSG:32619 a EPSG:4326 (WGS84)
     transformer = Transformer.from_crs("EPSG:32619", "EPSG:4326", always_xy=True)
     coords = []
     for coord in geometry["coordinates"][0]:
         lon, lat = transformer.transform(coord[0], coord[1])
         coords.append(f"{lat} {lon}")
     poly_string = " ".join(coords)
-    st.write("Consulta poly_string:", poly_string)
     query = f"""
     [out:json][timeout:25];
     (
@@ -249,7 +207,6 @@ def build_overpass_query_polygon(geometry):
     );
     out geom;
     """
-    st.write("Consulta Overpass:", query)
     return query
 
 def get_streets_by_polygon(boundary):
@@ -258,19 +215,13 @@ def get_streets_by_polygon(boundary):
     if not query:
         return None
     response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
-        st.error("Error al consultar Overpass API con perímetro.")
-        st.write("Respuesta:", response.text)
-        return None
     data = response.json()
-    if "elements" not in data or len(data["elements"]) == 0:
-        st.warning("No se encontraron calles en el perímetro especificado.")
-        st.write("Respuesta Overpass:", data)
-        return None
-    return data["elements"]
+    if data.get("elements"):
+        return data["elements"]
+    return None
 
 # -------------------------------
-# Funciones para asignación, clustering y mapeo (sin modificaciones)
+# Funciones para asignación, clustering y mapeo
 # -------------------------------
 def calculate_centroid(geometry):
     lats = [point["lat"] for point in geometry]
@@ -290,7 +241,7 @@ def assign_streets_cluster(streets, num_agents):
     data = np.array(data)
     kmeans = KMeans(n_clusters=num_agents, n_init=10, random_state=42).fit(data)
     labels = kmeans.labels_
-    assignments = { i: [] for i in range(num_agents) }
+    assignments = {i: [] for i in range(num_agents)}
     for label, idx in zip(labels, indices):
         assignments[label].append(streets[idx])
     return assignments
@@ -343,12 +294,8 @@ def create_map(assignments, mode, boundary, agent_colors):
             for street in streets_ordered:
                 if "geometry" in street:
                     coords = [(pt["lat"], pt["lon"]) for pt in street["geometry"]]
-                    folium.PolyLine(
-                        coords,
-                        color=agent_colors.get(agent, "#000000"),
-                        weight=4,
-                        tooltip=street.get("tags", {}).get("name", "Sin nombre")
-                    ).add_to(feature_group)
+                    folium.PolyLine(coords, color=agent_colors.get(agent, "#000000"), weight=4,
+                                    tooltip=street.get("tags", {}).get("name", "Sin nombre")).add_to(feature_group)
         elif mode == "Área":
             points = []
             for street in streets_ordered:
@@ -360,21 +307,11 @@ def create_map(assignments, mode, boundary, agent_colors):
                     polygon = MultiPoint(points).convex_hull
                     if isinstance(polygon, Polygon):
                         folium.GeoJson(
-                            data={
-                                "type": "Feature",
-                                "geometry": {
-                                    "type": "Polygon",
-                                    "coordinates": [list(polygon.exterior.coords)]
-                                }
-                            },
-                            style_function=lambda x, col=agent_colors.get(agent, "#000000"): {
-                                "fillColor": col,
-                                "color": col,
-                                "fillOpacity": 0.4
-                            }
+                            data={"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [list(polygon.exterior.coords)]}},
+                            style_function=lambda x, col=agent_colors.get(agent, "#000000"): {"fillColor": col, "color": col, "fillOpacity": 0.4}
                         ).add_to(feature_group)
-                except Exception as e:
-                    st.error(f"Error al calcular el área para el Agente {agent+1}: {e}")
+                except Exception:
+                    pass
         feature_group.add_to(m)
     folium.LayerControl().add_to(m)
     return m
@@ -420,8 +357,7 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
                 working_dates.append(current_date)
             current_date += pd.Timedelta(days=1)
         groups = [agent_df.iloc[i*rutas_por_dia:(i+1)*rutas_por_dia] for i in range(required_days)]
-        schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} 
-                           for date, group in zip(working_dates, groups)]
+        schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} for date, group in zip(working_dates, groups)]
     return schedule
 
 def update_provincia():
@@ -437,10 +373,8 @@ def update_municipio():
 @st.cache_data
 def load_division_excel():
     try:
-        df_div = pd.read_excel(DIVISION_XLSX_URL)
-        return df_div
-    except Exception as e:
-        st.error(f"Error al cargar el archivo Excel: {e}")
+        return pd.read_excel(DIVISION_XLSX_URL)
+    except Exception:
         return pd.DataFrame()
 
 df_division = load_division_excel()
@@ -449,56 +383,34 @@ df_division = load_division_excel()
 provincias_all = sorted(df_division["Provincia"].dropna().unique().tolist()) if "Provincia" in df_division.columns else []
 selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias_all, index=0, key="provincia", on_change=update_provincia)
 
-if selected_prov != "Todos":
-    df_prov = df_division[df_division["Provincia"] == selected_prov]
-else:
-    df_prov = df_division
+df_prov = df_division[df_division["Provincia"] == selected_prov] if selected_prov != "Todos" else df_division
 municipios_all = sorted(df_prov["Municipio"].dropna().unique().tolist()) if "Municipio" in df_prov.columns else []
 selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios_all, index=0, key="municipio", on_change=update_municipio)
 
-if selected_prov != "Todos" and selected_muni != "Todos":
-    df_muni = df_prov[df_prov["Municipio"] == selected_muni]
-else:
-    df_muni = df_prov
+df_muni = df_prov[df_prov["Municipio"] == selected_muni] if selected_prov != "Todos" and selected_muni != "Todos" else df_prov
 distritos_all = sorted(df_muni["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_muni.columns else []
 selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos_all, index=0, key="distrito")
 
-if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos":
-    df_dist = df_muni[df_muni["Distrito Municipal"] == selected_dist]
-else:
-    df_dist = df_muni
+df_dist = df_muni[df_muni["Distrito Municipal"] == selected_dist] if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" else df_muni
 secciones_all = sorted(df_dist["Sección"].dropna().unique().tolist()) if "Sección" in df_dist.columns else []
 selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones_all, index=0, key="seccion")
 
-if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" and selected_secc != "Todos":
-    df_secc = df_dist[df_dist["Sección"] == selected_secc]
-else:
-    df_secc = df_dist
+df_secc = df_dist[df_dist["Sección"] == selected_secc] if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" and selected_secc != "Todos" else df_dist
 barrios_all = sorted(df_secc["Barrio"].dropna().unique().tolist()) if "Barrio" in df_secc.columns else []
 selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios_all, index=0, key="barrio")
 
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
 
-# -------------------------------
-# Interfaz en Streamlit (TÍTULO Y DESCRIPCIÓN)
-# -------------------------------
 st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
 st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
 
-# -------------------------------
-# Botón para generar asignación
-# -------------------------------
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
 if st.sidebar.button("Generar asignación"):
     boundary = get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
-    if not boundary:
-        st.error("No se pudo obtener el perímetro de la división seleccionada. Verifica los filtros.")
-    else:
-        st.write("Perímetro obtenido de la división seleccionada:")
-        st.write(boundary)
+    if boundary:
         with st.spinner("Consultando Overpass API para obtener calles dentro del perímetro..."):
             streets = get_streets_by_polygon(boundary)
         if streets:
@@ -518,10 +430,9 @@ if st.sidebar.button("Generar asignación"):
             st.session_state.agent_colors = agent_colors
         else:
             st.session_state.resultado = None
+    else:
+        st.session_state.resultado = None
 
-# -------------------------------
-# Mostrar resultados
-# -------------------------------
 if st.session_state.resultado:
     st.subheader("Filtro de Agente")
     assignments_dict = st.session_state.get("assignments", {})
@@ -576,23 +487,25 @@ if st.session_state.resultado:
 else:
     st.info("Realice la solicitud de asignación para ver resultados.")
 
-footer = """
-<style>
-.footer {
-    position: fixed;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    background-color: #1e1e1e;
-    text-align: center;
-    padding: 10px 0;
-    font-size: 14px;
-    color: #e0e0e0;
-    border-top: 1px solid #333333;
-}
-</style>
-<div class="footer">
-    Creado por Pedro Miguel Figueroa Domínguez
-</div>
-"""
-st.markdown(footer, unsafe_allow_html=True)
+st.markdown(
+    """
+    <style>
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: #1e1e1e;
+        text-align: center;
+        padding: 10px 0;
+        font-size: 14px;
+        color: #e0e0e0;
+        border-top: 1px solid #333333;
+    }
+    </style>
+    <div class="footer">
+        Creado por Pedro Miguel Figueroa Domínguez
+    </div>
+    """,
+    unsafe_allow_html=True
+)
