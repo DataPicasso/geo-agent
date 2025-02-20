@@ -8,6 +8,7 @@ from io import BytesIO  # Para el manejo del Excel en memoria
 from sklearn.cluster import KMeans
 from geopy.distance import geodesic
 import numpy as np
+from pyproj import Transformer  # Para transformar coordenadas
 
 # -------------------------------
 # Estilos personalizados (tema oscuro)
@@ -233,9 +234,12 @@ def build_overpass_query_polygon(geometry):
         st.error("La geometría no es un polígono válido para la consulta.")
         st.write("Geometría recibida:", geometry)
         return ""
+    # Transformamos las coordenadas de EPSG:32619 a EPSG:4326 (WGS84)
+    transformer = Transformer.from_crs("EPSG:32619", "EPSG:4326", always_xy=True)
     coords = []
     for coord in geometry["coordinates"][0]:
-        coords.append(f"{coord[1]} {coord[0]}")
+        lon, lat = transformer.transform(coord[0], coord[1])
+        coords.append(f"{lat} {lon}")
     poly_string = " ".join(coords)
     st.write("Consulta poly_string:", poly_string)
     query = f"""
