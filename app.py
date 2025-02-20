@@ -116,7 +116,6 @@ def reorder_cluster(cluster_streets):
     """
     if len(cluster_streets) < 2:
         return cluster_streets
-    # Inicia con el primer elemento
     ordered = [cluster_streets.pop(0)]
     while cluster_streets:
         last = ordered[-1]
@@ -140,6 +139,13 @@ def reorder_cluster(cluster_streets):
         else:
             break
     return ordered
+
+# Función para generar colores aleatorios para cada agente
+def generate_agent_colors(num_agents):
+    colors = {}
+    for agent in range(1, num_agents+1):
+        colors[agent-1] = "#" + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
+    return colors
 
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
     all_centroids = []
@@ -202,9 +208,7 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
 
 def generate_dataframe(assignments, provincia, ciudad):
     rows = []
-    # Se guardará la información de cada calle con sus coordenadas (calculadas) y asignación
     for agent, streets in assignments.items():
-        # Reordena la lista para reflejar la ruta
         streets_ordered = reorder_cluster(streets.copy())
         for street in streets_ordered:
             name = street.get("tags", {}).get("name", "Sin nombre")
@@ -219,7 +223,7 @@ def generate_dataframe(assignments, provincia, ciudad):
                 "País": "República Dominicana",
                 "Latitud": lat,
                 "Longitud": lon,
-                "Agente": agent + 1  # Se muestra 1-indexado
+                "Agente": agent + 1
             })
     return pd.DataFrame(rows)
 
@@ -267,7 +271,6 @@ if st.sidebar.button("Generar asignación"):
     with st.spinner("Consultando Overpass API para obtener calles..."):
         streets = get_streets(provincia, ciudad)
     if streets:
-        # Se usa la nueva asignación basada en clustering y proximidad
         assignments = assign_streets_cluster(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
         mapa = create_map(assignments, mode, provincia, ciudad, agent_colors)
@@ -280,18 +283,16 @@ if st.sidebar.button("Generar asignación"):
 
 if st.session_state.resultado:
     st.subheader("Filtro de Agente")
-    # Opciones: "Todos" o agentes disponibles (se muestran como 1-indexados)
     assignments_dict = st.session_state.get("assignments", {})
     filtro_opciones = ["Todos"] + [str(i+1) for i in assignments_dict.keys()]
     agente_filtrar = st.sidebar.selectbox("Filtrar por agente:", options=filtro_opciones, key="agent_filter")
     
     if agente_filtrar != "Todos":
-        agente_seleccionado = int(agente_filtrar) - 1  # Convertir a 0-indexado
+        agente_seleccionado = int(agente_filtrar) - 1
         assignments_filtradas = { agente_seleccionado: assignments_dict.get(agente_seleccionado, []) }
     else:
         assignments_filtradas = assignments_dict
     
-    # Regenera el mapa según el filtro
     mapa_filtrado = create_map(assignments_filtradas, mode, provincia, ciudad, st.session_state.get("agent_colors", {}))
     
     st.subheader("Mapa de asignaciones")
