@@ -97,7 +97,7 @@ st.markdown(
 )
 
 # -------------------------------
-# Funciones para obtener niveles geográficos desde Overpass API
+# Funciones para obtener datos desde Overpass API
 # -------------------------------
 def get_provincias():
     query = """
@@ -107,11 +107,11 @@ def get_provincias():
     out tags;
     """
     url = "http://overpass-api.de/api/interpreter"
-    response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
+    resp = requests.post(url, data={'data': query})
+    if resp.status_code != 200:
         st.error("Error al consultar las provincias en Overpass API")
         return []
-    data = response.json()
+    data = resp.json()
     provincias = []
     for element in data.get("elements", []):
         name = element.get("tags", {}).get("name")
@@ -120,7 +120,7 @@ def get_provincias():
     return sorted(list(set(provincias)))
 
 def get_ciudades(provincia):
-    # Se asegura que la provincia esté dentro de República Dominicana
+    # Filtra las ciudades (admin_level ~ city/town/village) dentro de la provincia
     query = f"""
     [out:json];
     area["name"="República Dominicana"]->.country;
@@ -129,11 +129,11 @@ def get_ciudades(provincia):
     out;
     """
     url = "http://overpass-api.de/api/interpreter"
-    response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
+    resp = requests.post(url, data={'data': query})
+    if resp.status_code != 200:
         st.error("Error al consultar las ciudades en Overpass API")
         return []
-    data = response.json()
+    data = resp.json()
     ciudades = []
     for element in data.get("elements", []):
         name = element.get("tags", {}).get("name")
@@ -142,40 +142,60 @@ def get_ciudades(provincia):
     return sorted(list(set(ciudades)))
 
 def get_urbanizaciones(provincia, ciudad):
-    # Extrae los valores del tag addr:suburb dentro del área de la ciudad
+    """
+    Busca valores de "addr:suburb", "addr:quarter", "addr:neighbourhood" o "addr:hamlet"
+    en nodos dentro del área de la ciudad.
+    """
     query = f"""
     [out:json];
     area["name"="República Dominicana"]->.country;
     area["name"="{provincia}"](area.country)->.province;
     area["name"="{ciudad}"](area.province)->.city;
-    node(area.city)["addr:suburb"];
+    (
+      node(area.city)["addr:suburb"];
+      node(area.city)["addr:quarter"];
+      node(area.city)["addr:neighbourhood"];
+      node(area.city)["addr:hamlet"];
+    );
     out tags;
     """
     url = "http://overpass-api.de/api/interpreter"
-    response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
+    resp = requests.post(url, data={'data': query})
+    if resp.status_code != 200:
         st.error("Error al consultar urbanizaciones en Overpass API")
         return []
-    data = response.json()
+    data = resp.json()
     urbanizaciones = []
     for element in data.get("elements", []):
-        name = element.get("tags", {}).get("addr:suburb")
-        if name:
-            urbanizaciones.append(name)
+        tags = element.get("tags", {})
+        # Buscamos si tiene alguno de estos tags
+        for possible_tag in ["addr:suburb", "addr:quarter", "addr:neighbourhood", "addr:hamlet"]:
+            if possible_tag in tags:
+                urbanizaciones.append(tags[possible_tag])
     return sorted(list(set(urbanizaciones)))
 
 # -------------------------------
 # Funciones para generar calles y asignación optimizada
 # -------------------------------
 def build_overpass_query(provincia, ciudad, urbanizacion=None):
+    """
+    Si se especifica urbanizacion, se busca en nodos con "addr:suburb|quarter|neighbourhood|hamlet" = {urbanizacion},
+    luego se filtran las calles (way) dentro de esa área. Caso contrario, se filtran por la ciudad (area.city).
+    """
     if urbanizacion:
+        # Consulta extendida: nodos con cualquiera de esos tags
         query = f"""
         [out:json][timeout:25];
         area["name"="{provincia}"]->.province;
         area["name"="{ciudad}"](area.province)->.city;
-        node(area.city)["addr:suburb"="{urbanizacion}"]->.urbanizacion;
         (
-          way(area.urbanizacion)["highway"]["name"];
+          node(area.city)["addr:suburb"="{urbanizacion}"];
+          node(area.city)["addr:quarter"="{urbanizacion}"];
+          node(area.city)["addr:neighbourhood"="{urbanizacion}"];
+          node(area.city)["addr:hamlet"="{urbanizacion}"];
+        )->.urb;
+        (
+          way(area.urb)["highway"]["name"];
         );
         out geom;
         """
@@ -194,19 +214,19 @@ def build_overpass_query(provincia, ciudad, urbanizacion=None):
 def get_streets(provincia, ciudad, urbanizacion=None):
     url = "http://overpass-api.de/api/interpreter"
     query = build_overpass_query(provincia, ciudad, urbanizacion)
-    response = requests.post(url, data={'data': query})
-    if response.status_code != 200:
+    resp = requests.post(url, data={'data': query})
+    if resp.status_code != 200:
         st.error("Error al consultar Overpass API")
         return None
-    data = response.json()
+    data = resp.json()
     if "elements" not in data or len(data["elements"]) == 0:
         st.warning("No se encontraron calles con los filtros especificados.")
         return None
     return data["elements"]
 
 def calculate_centroid(geometry):
-    lats = [point["lat"] for point in geometry]
-    lons = [point["lon"] for point in geometry]
+    lats = [pt["lat"] for pt in geometry]
+    lons = [pt["lon"] for pt in geometry]
     return sum(lats) / len(lats), sum(lons) / len(lons)
 
 def assign_streets_cluster(streets, num_agents):
@@ -222,7 +242,7 @@ def assign_streets_cluster(streets, num_agents):
     data = np.array(data)
     kmeans = KMeans(n_clusters=num_agents, n_init=10, random_state=42).fit(data)
     labels = kmeans.labels_
-    assignments = { i: [] for i in range(num_agents) }
+    assignments = {i: [] for i in range(num_agents)}
     for label, idx in zip(labels, indices):
         assignments[label].append(streets[idx])
     return assignments
@@ -233,11 +253,13 @@ def reorder_cluster(cluster_streets):
     ordered = [cluster_streets.pop(0)]
     while cluster_streets:
         last = ordered[-1]
-        last_coord = calculate_centroid(last["geometry"]) if "geometry" in last and len(last["geometry"]) > 0 else None
+        last_coord = None
+        if "geometry" in last and len(last["geometry"]) > 0:
+            last_coord = calculate_centroid(last["geometry"])
         if not last_coord:
             break
         best = None
-        best_dist = float('inf')
+        best_dist = float("inf")
         best_index = None
         for i, street in enumerate(cluster_streets):
             if "geometry" in street and len(street["geometry"]) > 0:
@@ -256,15 +278,16 @@ def reorder_cluster(cluster_streets):
 
 def generate_agent_colors(num_agents):
     colors = {}
-    for agent in range(1, num_agents+1):
-        colors[agent-1] = "#" + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
+    for agent in range(num_agents):
+        # Genera color hex aleatorio
+        colors[agent] = "#" + "".join(random.choice("0123456789ABCDEF") for _ in range(6))
     return colors
 
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
     m = folium.Map(location=[19.0, -70.0], zoom_start=8, tiles="cartodbpositron")
     for agent, streets in assignments.items():
         streets_ordered = reorder_cluster(streets.copy())
-        feature_group = folium.FeatureGroup(name=f"Agente {agent+1}")
+        fg = folium.FeatureGroup(name=f"Agente {agent+1}")
         if mode == "Calles":
             for street in streets_ordered:
                 if "geometry" in street:
@@ -274,8 +297,8 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
                         color=agent_colors.get(agent, "#000000"),
                         weight=4,
                         tooltip=street.get("tags", {}).get("name", "Sin nombre")
-                    ).add_to(feature_group)
-        elif mode == "Área":
+                    ).add_to(fg)
+        else:  # mode == "Área"
             points = []
             for street in streets_ordered:
                 if "geometry" in street:
@@ -298,10 +321,10 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
                                 "color": col,
                                 "fillOpacity": 0.4
                             }
-                        ).add_to(feature_group)
+                        ).add_to(fg)
                 except Exception as e:
                     st.error(f"Error al calcular el área para el Agente {agent+1}: {e}")
-        feature_group.add_to(m)
+        fg.add_to(m)
     folium.LayerControl().add_to(m)
     return m
 
@@ -311,10 +334,9 @@ def generate_dataframe(assignments, provincia, ciudad):
         streets_ordered = reorder_cluster(streets.copy())
         for street in streets_ordered:
             name = street.get("tags", {}).get("name", "Sin nombre")
+            lat, lon = None, None
             if "geometry" in street and len(street["geometry"]) > 0:
                 lat, lon = calculate_centroid(street["geometry"])
-            else:
-                lat, lon = None, None
             rows.append({
                 "Calle": name,
                 "Provincia": provincia,
@@ -327,12 +349,6 @@ def generate_dataframe(assignments, provincia, ciudad):
     return pd.DataFrame(rows)
 
 def generate_schedule(df, working_days, start_date, rutas_por_dia):
-    """
-    Genera un calendario de visitas para cada agente.
-    Se asume una jornada laboral normal con los días seleccionados.
-    Divide la ruta asignada de cada agente en grupos de 'rutas_por_dia'
-    y asigna cada grupo a una fecha laboral a partir de la fecha de inicio.
-    """
     schedule = {}
     for agent in sorted(df["Agente"].unique()):
         agent_df = df[df["Agente"] == agent].copy()
@@ -360,7 +376,10 @@ def update_provincia():
 # Interfaz en Streamlit
 # -------------------------------
 st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
-st.markdown("Esta aplicación utiliza **inteligencia artificial** para organizar y repartir las rutas de calles en República Dominicana, optimizando la distribución entre agentes geográficos.")
+st.markdown(
+    "Esta aplicación utiliza **inteligencia artificial** para organizar y repartir "
+    "las rutas de calles en República Dominicana, optimizando la distribución entre agentes geográficos."
+)
 
 st.sidebar.header("Configuración de GEO AGENT")
 
@@ -369,9 +388,13 @@ provincias = get_provincias()
 if provincias:
     if "provincia" not in st.session_state:
         st.session_state.provincia = provincias[0]
-    provincia = st.sidebar.selectbox("Seleccione la provincia:", provincias,
-                                     index=provincias.index(st.session_state.provincia),
-                                     key="provincia", on_change=update_provincia)
+    provincia = st.sidebar.selectbox(
+        "Seleccione la provincia:",
+        provincias,
+        index=provincias.index(st.session_state.provincia),
+        key="provincia",
+        on_change=update_provincia
+    )
 else:
     provincia = None
 
@@ -380,22 +403,32 @@ ciudades = get_ciudades(provincia) if provincia else []
 if ciudades:
     if "ciudad" not in st.session_state or st.session_state.ciudad not in ciudades:
         st.session_state.ciudad = ciudades[0]
-    ciudad = st.sidebar.selectbox("Seleccione la ciudad:", ciudades,
-                                  index=ciudades.index(st.session_state.ciudad),
-                                  key="ciudad")
+    ciudad = st.sidebar.selectbox(
+        "Seleccione la ciudad:",
+        ciudades,
+        index=ciudades.index(st.session_state.ciudad),
+        key="ciudad"
+    )
 else:
     ciudad = None
 
-# Filtro: Urbanización (Sección/Barrio/Paraje)
-urbanizaciones = get_urbanizaciones(provincia, ciudad) if (provincia and ciudad) else []
-if urbanizaciones:
-    if "urbanizacion" not in st.session_state or st.session_state.urbanizacion not in urbanizaciones:
+# Filtro: Urbanización (Sección/Barrio/Paraje) - usando varios tags
+urbanizaciones = []
+if provincia and ciudad:
+    urbanizaciones = get_urbanizaciones(provincia, ciudad)
+
+if "urbanizacion" not in st.session_state or (st.session_state.urbanizacion not in urbanizaciones):
+    if urbanizaciones:
         st.session_state.urbanizacion = urbanizaciones[0]
-    urbanizacion = st.sidebar.selectbox("Seleccione la urbanización (Sección/Barrio/Paraje):", urbanizaciones,
-                                        index=urbanizaciones.index(st.session_state.urbanizacion),
-                                        key="urbanizacion")
-else:
-    urbanizacion = None
+    else:
+        st.session_state.urbanizacion = None
+
+urbanizacion = st.sidebar.selectbox(
+    "Seleccione la urbanización (Sección/Barrio/Paraje):",
+    urbanizaciones,
+    index=urbanizaciones.index(st.session_state.urbanizacion) if (urbanizaciones and st.session_state.urbanizacion) else 0,
+    key="urbanizacion"
+)
 
 if not ciudad:
     st.error("No se encontró ciudad.")
@@ -408,7 +441,6 @@ if "resultado" not in st.session_state:
 
 if st.sidebar.button("Generar asignación"):
     with st.spinner("Consultando Overpass API para obtener calles..."):
-        # Si se ha seleccionado urbanización, usa consulta extendida
         if urbanizacion:
             streets = get_streets(provincia, ciudad, urbanizacion)
         else:
@@ -418,6 +450,7 @@ if st.sidebar.button("Generar asignación"):
         agent_colors = generate_agent_colors(num_agents)
         mapa = create_map(assignments, mode, provincia, ciudad, agent_colors)
         df = generate_dataframe(assignments, provincia, ciudad)
+        # Orden de visita
         order_list = []
         for agent, streets_assigned in assignments.items():
             streets_ordered = reorder_cluster(streets_assigned.copy())
@@ -435,11 +468,15 @@ if st.session_state.resultado:
     st.subheader("Filtro de Agente")
     assignments_dict = st.session_state.get("assignments", {})
     filtro_opciones = ["Todos"] + [str(i+1) for i in assignments_dict.keys()]
-    agente_filtrar = st.sidebar.selectbox("Filtrar por agente:", options=filtro_opciones, key="agent_filter")
+    agente_filtrar = st.sidebar.selectbox(
+        "Seleccione el agente a filtrar:",
+        options=filtro_opciones,
+        key="agent_filter"
+    )
     
     if agente_filtrar != "Todos":
         agente_seleccionado = int(agente_filtrar) - 1
-        assignments_filtradas = { agente_seleccionado: assignments_dict.get(agente_seleccionado, []) }
+        assignments_filtradas = {agente_seleccionado: assignments_dict.get(agente_seleccionado, [])}
     else:
         assignments_filtradas = assignments_dict
     
@@ -449,12 +486,13 @@ if st.session_state.resultado:
     mapa_html = mapa_filtrado._repr_html_()
     st.components.v1.html(mapa_html, width=700, height=500, scrolling=True)
     
-    if not st.session_state.resultado["dataframe"].empty:
+    df_res = st.session_state.resultado["dataframe"]
+    if not df_res.empty:
         st.subheader("Datos asignados")
-        st.dataframe(st.session_state.resultado["dataframe"])
+        st.dataframe(df_res)
         
         output = BytesIO()
-        st.session_state.resultado["dataframe"].to_excel(output, index=False, engine='openpyxl')
+        df_res.to_excel(output, index=False, engine='openpyxl')
         output.seek(0)
         st.download_button(
             label="Descargar Excel",
@@ -468,13 +506,13 @@ if st.session_state.resultado:
             start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("today"))
             rutas_por_dia = st.number_input("Cantidad de rutas por día", min_value=1, value=3, step=1)
             working_days = st.multiselect(
-                "Días laborables", 
+                "Días laborables",
                 options=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
                 default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
             )
             if working_days:
-                schedule = generate_schedule(st.session_state.resultado["dataframe"], working_days, start_date, rutas_por_dia)
-                agente_calendario = st.selectbox("Selecciona el agente para ver su calendario:", options=sorted(schedule.keys()))
+                schedule = generate_schedule(df_res, working_days, start_date, rutas_por_dia)
+                agente_calendario = st.selectbox("Selecciona el agente para ver su calendario:", sorted(schedule.keys()))
                 st.write(f"### Calendario para el Agente {agente_calendario}")
                 schedule_df = pd.DataFrame(schedule[agente_calendario])
                 st.dataframe(schedule_df)
