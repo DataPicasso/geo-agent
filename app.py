@@ -10,43 +10,41 @@ from geopy.distance import geodesic
 import numpy as np
 
 # -------------------------------
-# Estilos personalizados sofisticados (tonos fríos y azul) con mayor especificidad y labels estilizados
+# Estilos personalizados (tema oscuro)
 # -------------------------------
 st.markdown(
     """
     <style>
-    /* Fuente refinada */
+    /* Fuente y fondo oscuro */
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
-    
-    /* Fondo con degradado sutil (tonos fríos) */
     body, .stApp {
-        background: linear-gradient(135deg, #edf7fc, #dbeff9);
+        background: linear-gradient(135deg, #121212, #1e1e1e);
         font-family: 'Roboto', sans-serif;
-        color: #1a1a1a;
+        color: #e0e0e0;
     }
     
-    /* Estilo para la barra lateral */
+    /* Barra lateral con fondo oscuro */
     [data-testid="stSidebar"] {
-        background: #f2f9fd;
+        background: #1a1a1a;
         border: none;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.7);
     }
     
-    /* Estilizar los labels (textos arriba de los cuadros) en la barra lateral */
+    /* Labels en la barra lateral en color claro */
     [data-testid="stSidebar"] label {
-        color: #003366 !important;
+        color: #e0e0e0 !important;
         font-weight: 600 !important;
     }
     
-    /* Encabezados y textos */
+    /* Encabezados en tonos claros */
     h1, h2, h3, h4, h5, h6 {
-        color: #003366;
+        color: #ffffff;
     }
     
-    /* Botones refinados en la barra lateral */
+    /* Botones en la barra lateral */
     [data-testid="stSidebar"] .stButton > button {
-        background-color: #007bff !important;
-        color: #fff !important;
+        background-color: #333333 !important;
+        color: #e0e0e0 !important;
         border-radius: 8px !important;
         border: none !important;
         font-size: 16px !important;
@@ -55,13 +53,13 @@ st.markdown(
         transition: background-color 0.3s ease;
     }
     [data-testid="stSidebar"] .stButton > button:hover {
-        background-color: #0056b3 !important;
+        background-color: #444444 !important;
     }
     
-    /* Botones refinados en el cuerpo principal */
+    /* Botones en el cuerpo principal */
     .stButton > button, .stDownloadButton > button {
-        background-color: #007bff !important;
-        color: #fff !important;
+        background-color: #333333 !important;
+        color: #e0e0e0 !important;
         border-radius: 8px !important;
         border: none !important;
         font-size: 16px !important;
@@ -70,28 +68,28 @@ st.markdown(
         transition: background-color 0.3s ease;
     }
     .stButton > button:hover, .stDownloadButton > button:hover {
-        background-color: #0056b3 !important;
+        background-color: #444444 !important;
     }
     
-    /* Estilos para tablas y contenedores */
+    /* Tablas y contenedores con fondo oscuro */
     .css-1lcbmhc {
-        background-color: #ffffff;
+        background-color: #2a2a2a;
         border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
     }
     
-    /* Pie de página sofisticado */
+    /* Pie de página oscuro */
     .footer {
         position: fixed;
         left: 0;
         bottom: 0;
         width: 100%;
-        background-color: #e3f2fd;
+        background-color: #1e1e1e;
         text-align: center;
         padding: 10px 0;
         font-size: 14px;
-        color: #333;
-        border-top: 1px solid #ccc;
+        color: #e0e0e0;
+        border-top: 1px solid #333333;
     }
     </style>
     """,
