@@ -172,7 +172,7 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
 def get_province_boundary(provincia):
     query = f"""
     [out:json][timeout:25];
-    area["name"="República Dominicana"]->.country;
+    area["name"="🇩🇴 República Dominicana"]->.country;
     area["name"="{provincia}"](area.country)->.provincia;
     (
       relation(area.provincia)["boundary"="administrative"]["admin_level"="4"];
@@ -340,9 +340,25 @@ def generate_dataframe(assignments, selected_prov, selected_muni, selected_dist,
             })
     return pd.DataFrame(rows)
 
-# -------------------------------
-# Eliminamos la función de generación de calendario
-# -------------------------------
+def generate_schedule(df, working_days, start_date, rutas_por_dia):
+    schedule = {}
+    for agent in sorted(df["Agente"].unique()):
+        agent_df = df[df["Agente"] == agent].copy()
+        if "Order" in agent_df.columns:
+            agent_df = agent_df.sort_values("Order")
+        else:
+            agent_df = agent_df.reset_index(drop=True)
+        total_routes = len(agent_df)
+        required_days = int(np.ceil(total_routes / rutas_por_dia))
+        working_dates = []
+        current_date = pd.to_datetime(start_date)
+        while len(working_dates) < required_days:
+            if current_date.strftime("%A") in working_days:
+                working_dates.append(current_date)
+            current_date += pd.Timedelta(days=1)
+        groups = [agent_df.iloc[i*rutas_por_dia:(i+1)*rutas_por_dia] for i in range(required_days)]
+        schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} for date, group in zip(working_dates, groups)]
+    return schedule
 
 def update_provincia():
     st.session_state.municipio = None
@@ -387,7 +403,7 @@ num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
 
 st.title("GEO AGENT 🇩🇴: Organización Inteligente de Rutas en República Dominicana")
-st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
+st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área en 🇩🇴 República Dominicana. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
 
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
