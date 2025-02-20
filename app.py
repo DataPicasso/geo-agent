@@ -3,7 +3,6 @@ import requests
 import pandas as pd
 import folium
 import random
-from streamlit_folium import st_folium
 from shapely.geometry import MultiPoint, Polygon
 from io import BytesIO  # Para el manejo del Excel en memoria
 
@@ -180,7 +179,6 @@ def generate_dataframe(assignments, provincia):
 # Callbacks para mantener la selección en session_state
 # -------------------------------
 def update_provincia():
-    # Al cambiar de provincia, reiniciamos la ciudad en session_state
     st.session_state.ciudad = None
 
 # -------------------------------
@@ -190,7 +188,6 @@ def update_provincia():
 st.title("Asignación de Calles a Agentes en República Dominicana")
 st.sidebar.header("Configuración")
 
-# Obtener provincias y fijar clave para preservar la selección
 provincias = get_provincias()
 if not provincias:
     st.error("No se pudo obtener la lista de provincias.")
@@ -201,7 +198,6 @@ else:
                                      index=provincias.index(st.session_state.provincia),
                                      key="provincia", on_change=update_provincia)
 
-    # Obtener ciudades basadas en la provincia seleccionada
     ciudades = get_ciudades(provincia)
     if ciudades:
         if "ciudad" not in st.session_state or st.session_state.ciudad not in ciudades:
@@ -232,7 +228,10 @@ if st.sidebar.button("Generar asignación"):
 
 if st.session_state.resultado:
     st.subheader("Mapa de asignaciones")
-    st_folium(st.session_state.resultado["mapa"], width=700, height=500)
+    # Se usa st.components.v1.html para mostrar el mapa generado por Folium
+    mapa_html = st.session_state.resultado["mapa"]._repr_html_()
+    st.components.v1.html(mapa_html, width=700, height=500, scrolling=True)
+    
     if not st.session_state.resultado["dataframe"].empty:
         st.subheader("Datos asignados")
         st.dataframe(st.session_state.resultado["dataframe"])
