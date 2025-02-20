@@ -10,61 +10,65 @@ from geopy.distance import geodesic
 import numpy as np
 
 # -------------------------------
-# Estilos personalizados (grises y azul)
+# Estilos personalizados sofisticados (tonos grises y azul)
 # -------------------------------
 st.markdown(
     """
     <style>
-    /* Fondo general y tipografía */
+    /* Fondo con degradado sutil y fuente refinada */
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
     body, .stApp {
-        background-color: #f2f2f2;
-        color: #333333;
-        font-family: Arial, sans-serif;
+        background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+        font-family: 'Roboto', sans-serif;
+        color: #333;
     }
     
-    /* Estilos de la barra lateral */
-    .css-1d391kg { 
-        background-color: #e6e6e6;
-    }
-    .sidebar .sidebar-content {
-        background-color: #e6e6e6;
+    /* Estilo para la barra lateral */
+    .css-1d391kg, .sidebar .sidebar-content {
+        background: #eef2f3;
+        border: none;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     
-    /* Estilos para botones */
-    .stButton>button, .stDownloadButton>button {
-        background-color: #004c99 !important;
-        color: white !important;
+    /* Encabezados y textos */
+    h1, h2, h3, h4, h5, h6 {
+        color: #003366;
+    }
+    
+    /* Botones refinados */
+    .stButton > button, .stDownloadButton > button {
+        background-color: #00509e !important;
+        color: #fff !important;
         border-radius: 8px !important;
         border: none !important;
         font-size: 16px !important;
-        font-weight: bold !important;
-        padding: 10px 16px !important;
+        font-weight: 500 !important;
+        padding: 10px 20px !important;
+        transition: background-color 0.3s ease;
     }
-    .stButton>button:hover, .stDownloadButton>button:hover {
-        background-color: #003366 !important;
-    }
-    
-    /* Encabezados */
-    h1, h2, h3, h4, h5, h6 {
-        color: #004c99;
+    .stButton > button:hover, .stDownloadButton > button:hover {
+        background-color: #003f7f !important;
     }
     
-    /* Estilos para tablas y dataframes */
+    /* Estilos para tablas y contenedores */
     .css-1lcbmhc {
-        background-color: #ffffff;
+        background-color: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
     }
     
-    /* Pie de página */
+    /* Pie de página sofisticado */
     .footer {
         position: fixed;
         left: 0;
         bottom: 0;
         width: 100%;
-        background-color: #d9d9d9;
+        background-color: #dde1e7;
         text-align: center;
-        padding: 10px;
+        padding: 10px 0;
         font-size: 14px;
-        color: #333333;
+        color: #333;
+        border-top: 1px solid #ccc;
     }
     </style>
     """,
@@ -418,7 +422,7 @@ else:
     st.info("Realice la solicitud de asignación para ver resultados.")
 
 # -------------------------------
-# Pie de página
+# Pie de página sofisticado
 # -------------------------------
 footer = """
 <style>
@@ -427,11 +431,12 @@ footer = """
     left: 0;
     bottom: 0;
     width: 100%;
-    background-color: #d9d9d9;
+    background-color: #dde1e7;
     text-align: center;
-    padding: 10px;
+    padding: 10px 0;
     font-size: 14px;
-    color: #333333;
+    color: #333;
+    border-top: 1px solid #ccc;
 }
 </style>
 <div class="footer">
