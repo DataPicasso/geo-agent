@@ -8,6 +8,10 @@ Esta aplicación en Streamlit permite:
 - Visualizar la asignación en un mapa interactivo mediante Folium, con la posibilidad de filtrar por agente y ver la visualización ya sea como líneas (calles) o como áreas (convex hull).
 - Exportar la información a un archivo Excel (.xlsx) con columnas: Calle, Provincia, País, Latitud, Longitud y Agente.
 
+## Acceso a la Aplicación
+Puedes acceder a la aplicación desplegada en Streamlit en el siguiente enlace:
+[GeoAgent RD](https://geoagent.streamlit.app/#b21eb022)
+
 ## Requisitos
 
 - Python 3.7 o superior.
