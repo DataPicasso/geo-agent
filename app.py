@@ -97,8 +97,28 @@ st.markdown(
 )
 
 # -------------------------------
-# Funciones para obtener provincias y ciudades dinámicamente desde Overpass API
+# Funciones para obtener niveles geográficos desde Overpass API
 # -------------------------------
+def get_regiones():
+    query = """
+    [out:json];
+    area["name"="República Dominicana"]->.country;
+    rel(area.country)["admin_level"="3"]["boundary"="administrative"];
+    out tags;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar las regiones en Overpass API")
+        return []
+    data = response.json()
+    regiones = []
+    for element in data.get("elements", []):
+        name = element.get("tags", {}).get("name")
+        if name:
+            regiones.append(name)
+    return sorted(list(set(regiones)))
+
 def get_provincias():
     query = """
     [out:json];
@@ -119,53 +139,112 @@ def get_provincias():
             provincias.append(name)
     return sorted(list(set(provincias)))
 
-def get_ciudades(provincia):
-    # Se asegura que la provincia esté dentro de República Dominicana
+def get_municipios(provincia):
     query = f"""
     [out:json];
     area["name"="República Dominicana"]->.country;
     area["name"="{provincia}"](area.country)->.province;
-    node(area.province)["place"~"^(city|town|village)$"];
-    out;
+    rel(area.province)["admin_level"="6"]["boundary"="administrative"];
+    out tags;
     """
     url = "http://overpass-api.de/api/interpreter"
     response = requests.post(url, data={'data': query})
     if response.status_code != 200:
-        st.error("Error al consultar las ciudades en Overpass API")
+        st.error("Error al consultar los municipios en Overpass API")
         return []
     data = response.json()
-    ciudades = []
+    municipios = []
     for element in data.get("elements", []):
         name = element.get("tags", {}).get("name")
         if name:
-            ciudades.append(name)
-    return sorted(list(set(ciudades)))
+            municipios.append(name)
+    return sorted(list(set(municipios)))
+
+def get_distritos(municipio):
+    query = f"""
+    [out:json];
+    area["name"="República Dominicana"]->.country;
+    area["name"="{municipio}"](area.country)->.municipio;
+    rel(area.municipio)["admin_level"="7"]["boundary"="administrative"];
+    out tags;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar los distritos municipales en Overpass API")
+        return []
+    data = response.json()
+    distritos = []
+    for element in data.get("elements", []):
+        name = element.get("tags", {}).get("name")
+        if name:
+            distritos.append(name)
+    return sorted(list(set(distritos)))
+
+def get_secciones(distrito):
+    query = f"""
+    [out:json];
+    area["name"="República Dominicana"]->.country;
+    area["name"="{distrito}"](area.country)->.distrito;
+    node(area.distrito)["addr:suburb"];
+    out tags;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar las secciones en Overpass API")
+        return []
+    data = response.json()
+    secciones = []
+    for element in data.get("elements", []):
+        # Se asume que el tag addr:suburb es el que contiene la información de Sección / Barrio / Paraje.
+        name = element.get("tags", {}).get("addr:suburb")
+        if name:
+            secciones.append(name)
+    return sorted(list(set(secciones)))
 
 # -------------------------------
 # Funciones para generar calles y asignación optimizada
 # -------------------------------
-def build_overpass_query(provincia, ciudad):
-    query = f"""
-    [out:json][timeout:25];
-    area["name"="{provincia}"]->.province;
-    area["name"="{ciudad}"](area.province)->.city;
-    (
-      way(area.city)["highway"]["name"];
-    );
-    out geom;
-    """
+def build_overpass_query(provincia, ciudad, region=None, distrito=None, seccion=None):
+    # Si se han seleccionado todos los filtros adicionales, usa la consulta extendida
+    if region and distrito and seccion:
+        query = f"""
+        [out:json][timeout:25];
+        area["name"="República Dominicana"]->.country;
+        area["name"="{region}"](area.country)->.region;
+        area["name"="{provincia}"](area.region)->.province;
+        area["name"="{ciudad}"](area.province)->.municipio;
+        area["name"="{distrito}"](area.municipio)->.distrito;
+        node(area.distrito)["addr:suburb"="{seccion}"]->.seccion;
+        (
+          way(area.seccion)["highway"]["name"];
+        );
+        out geom;
+        """
+    else:
+        # Consulta tradicional basada en Provincia y Ciudad (Municipio)
+        query = f"""
+        [out:json][timeout:25];
+        area["name"="{provincia}"]->.province;
+        area["name"="{ciudad}"](area.province)->.city;
+        (
+          way(area.city)["highway"]["name"];
+        );
+        out geom;
+        """
     return query
 
-def get_streets(provincia, ciudad):
+def get_streets(provincia, ciudad, region=None, distrito=None, seccion=None):
     url = "http://overpass-api.de/api/interpreter"
-    query = build_overpass_query(provincia, ciudad)
+    query = build_overpass_query(provincia, ciudad, region, distrito, seccion)
     response = requests.post(url, data={'data': query})
     if response.status_code != 200:
         st.error("Error al consultar Overpass API")
         return None
     data = response.json()
     if "elements" not in data or len(data["elements"]) == 0:
-        st.warning("No se encontraron calles en la región especificada.")
+        st.warning("No se encontraron calles con los filtros especificados.")
         return None
     return data["elements"]
 
@@ -309,7 +388,6 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
     schedule = {}
     for agent in sorted(df["Agente"].unique()):
         agent_df = df[df["Agente"] == agent].copy()
-        # Ordenar según la columna "Order" si existe, o por el índice
         if "Order" in agent_df.columns:
             agent_df = agent_df.sort_values("Order")
         else:
@@ -338,40 +416,74 @@ st.markdown("Esta aplicación utiliza **inteligencia artificial** para organizar
 
 st.sidebar.header("Configuración de GEO AGENT")
 
-provincias = get_provincias()
-if not provincias:
-    st.error("No se pudo obtener la lista de provincias.")
+# Selección de Región
+regiones = get_regiones()
+if regiones:
+    if "region" not in st.session_state:
+        st.session_state.region = regiones[0]
+    region = st.sidebar.selectbox("Seleccione la región:", regiones, index=regiones.index(st.session_state.region), key="region")
 else:
+    region = None
+
+# Selección de Provincia
+provincias = get_provincias()
+if provincias:
     if "provincia" not in st.session_state:
         st.session_state.provincia = provincias[0]
-    provincia = st.sidebar.selectbox("Seleccione la provincia:", provincias,
-                                     index=provincias.index(st.session_state.provincia),
-                                     key="provincia", on_change=update_provincia)
+    provincia = st.sidebar.selectbox("Seleccione la provincia:", provincias, index=provincias.index(st.session_state.provincia), key="provincia", on_change=update_provincia)
+else:
+    provincia = None
 
-    ciudades = get_ciudades(provincia)
-    if ciudades:
-        if "ciudad" not in st.session_state or st.session_state.ciudad not in ciudades:
-            st.session_state.ciudad = ciudades[0]
-        ciudad = st.sidebar.selectbox("Seleccione la ciudad:", ciudades,
-                                      index=ciudades.index(st.session_state.ciudad),
-                                      key="ciudad")
-    else:
-        st.warning("No se encontraron ciudades para la provincia seleccionada.")
+# Selección de Municipio (usamos el desplegable actual de ciudades)
+ciudades = get_ciudades(provincia) if provincia else []
+if ciudades:
+    if "municipio" not in st.session_state or st.session_state.municipio not in ciudades:
+        st.session_state.municipio = ciudades[0]
+    municipio = st.sidebar.selectbox("Seleccione el municipio:", ciudades, index=ciudades.index(st.session_state.municipio), key="municipio")
+else:
+    municipio = None
 
+# Selección de Distrito Municipal
+distritos = get_distritos(municipio) if municipio else []
+if distritos:
+    if "distrito" not in st.session_state or st.session_state.distrito not in distritos:
+        st.session_state.distrito = distritos[0]
+    distrito = st.sidebar.selectbox("Seleccione el distrito municipal:", distritos, index=distritos.index(st.session_state.distrito), key="distrito")
+else:
+    distrito = None
+
+# Selección de Sección / Barrio / Paraje
+secciones = get_secciones(distrito) if distrito else []
+if secciones:
+    if "seccion" not in st.session_state or st.session_state.seccion not in secciones:
+        st.session_state.seccion = secciones[0]
+    seccion = st.sidebar.selectbox("Seleccione la sección / barrio / paraje:", secciones, index=secciones.index(st.session_state.seccion), key="seccion")
+else:
+    seccion = None
+
+# Los desplegables actuales para asignación: usamos Municipio como "ciudad" en la consulta tradicional
+if not municipio:
+    st.error("No se encontró municipio.")
+    
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
 
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
+# Generación de asignación y rutas
 if st.sidebar.button("Generar asignación"):
     with st.spinner("Consultando Overpass API para obtener calles..."):
-        streets = get_streets(provincia, ciudad)
+        # Si se han seleccionado filtros adicionales (región, distrito y seccion), usa la consulta extendida
+        if region and distrito and seccion:
+            streets = get_streets(provincia, municipio, region, distrito, seccion)
+        else:
+            streets = get_streets(provincia, municipio)
     if streets:
         assignments = assign_streets_cluster(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
-        mapa = create_map(assignments, mode, provincia, ciudad, agent_colors)
-        df = generate_dataframe(assignments, provincia, ciudad)
+        mapa = create_map(assignments, mode, provincia, municipio, agent_colors)
+        df = generate_dataframe(assignments, provincia, municipio)
         order_list = []
         for agent, streets_assigned in assignments.items():
             streets_ordered = reorder_cluster(streets_assigned.copy())
@@ -397,7 +509,7 @@ if st.session_state.resultado:
     else:
         assignments_filtradas = assignments_dict
     
-    mapa_filtrado = create_map(assignments_filtradas, mode, provincia, ciudad, st.session_state.get("agent_colors", {}))
+    mapa_filtrado = create_map(assignments_filtradas, mode, provincia, municipio, st.session_state.get("agent_colors", {}))
     
     st.subheader("Mapa de asignaciones")
     mapa_html = mapa_filtrado._repr_html_()
