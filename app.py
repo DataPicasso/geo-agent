@@ -1,10 +1,11 @@
 import streamlit as st
+import googlemaps
 import requests
 import pandas as pd
 import folium
 import random
 from shapely.geometry import MultiPoint, Polygon
-from io import BytesIO  # Para el manejo del Excel en memoria
+from io import BytesIO
 from sklearn.cluster import KMeans
 from geopy.distance import geodesic
 import numpy as np
@@ -82,142 +83,52 @@ st.markdown(
 )
 
 # -------------------------------
-# URLs de los GeoJSON
+# Configuración de la API de Google (Places API NEW)
 # -------------------------------
-REGION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WPS&version=1.0.0&request=GetExecutionResult&executionId=861818a4-710f-4725-9b50-d9fd316fcc41&outputId=result.json&mimetype=application%2Fjson"
-PROVINCE_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WPS&version=1.0.0&request=GetExecutionResult&executionId=f9035478-e790-46ee-93bb-61bc24a828b4&outputId=result.json&mimetype=application%2Fjson"
-MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WPS&version=1.0.0&request=GetExecutionResult&executionId=b6016b9f-04b3-44b6-80fd-07021bc031e5&outputId=result.json&mimetype=application%2Fjson"
-DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WPS&version=1.0.0&request=GetExecutionResult&executionId=48235a8e-b7e0-408b-96ed-9c4b83f1e63c&outputId=result.json&mimetype=application%2Fjson"
-SECCION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WPS&version=1.0.0&request=GetExecutionResult&executionId=dca0cc18-0474-49e7-b107-10f759a7eabb&outputId=result.json&mimetype=application%2Fjson"
+# La clave se obtiene desde st.secrets (configurada en Streamlit Cloud)
+GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+gmaps = googlemaps.Client(key=GOOGLE_API_KEY)
 
 # -------------------------------
-# Funciones para cargar y parsear los GeoJSON
+# Funciones para obtener límites administrativos con Google Places API
 # -------------------------------
-def load_geojson(url):
+def get_boundary(place_query):
+    """
+    Consulta la Places API (geocode) para obtener la geometría (bounds o viewport)
+    del lugar especificado.
+    Retorna una tupla (south, west, north, east) o None si no se encuentra.
+    """
     try:
-        resp = requests.get(url)
-        if resp.status_code == 200:
-            return resp.json()
-        else:
-            st.error(f"No se pudo cargar el GeoJSON desde {url}")
-            return None
+        geocode_result = gmaps.geocode(place_query)
+        if geocode_result:
+            geometry = geocode_result[0].get("geometry", {})
+            # Preferimos 'bounds', sino usamos 'viewport'
+            bounds = geometry.get("bounds") or geometry.get("viewport")
+            if bounds:
+                northeast = bounds.get("northeast")
+                southwest = bounds.get("southwest")
+                if northeast and southwest:
+                    return (southwest["lat"], southwest["lng"], northeast["lat"], northeast["lng"])
     except Exception as e:
-        st.error(f"Error al cargar el GeoJSON: {e}")
-        return None
-
-def get_regiones():
-    """
-    Retorna la lista de nombres de las regiones, extraídas del GeoJSON correspondiente.
-    """
-    data = st.session_state.get("geojson_regiones", {})
-    if not data or "features" not in data:
-        return []
-    # Ajustar según la estructura real del GeoJSON
-    regiones = []
-    for feature in data["features"]:
-        props = feature.get("properties", {})
-        nombre = props.get("NOMBRE_REGION", None)
-        if nombre:
-            regiones.append(nombre)
-    return sorted(list(set(regiones)))
-
-def get_provincias_por_region(region):
-    """
-    Retorna la lista de provincias que pertenecen a la región especificada,
-    utilizando el GeoJSON de provincias.
-    """
-    if not region:
-        return []
-    data = st.session_state.get("geojson_provincias", {})
-    if not data or "features" not in data:
-        return []
-    provincias = []
-    for feature in data["features"]:
-        props = feature.get("properties", {})
-        nombre_prov = props.get("NOMBRE_PROVINCIA", None)
-        nombre_region = props.get("NOMBRE_REGION", None)
-        if nombre_prov and nombre_region == region:
-            provincias.append(nombre_prov)
-    return sorted(list(set(provincias)))
-
-def get_municipios_por_provincia(provincia):
-    """
-    Retorna la lista de municipios que pertenecen a la provincia especificada,
-    usando el GeoJSON de municipios.
-    """
-    if not provincia:
-        return []
-    data = st.session_state.get("geojson_municipios", {})
-    if not data or "features" not in data:
-        return []
-    municipios = []
-    for feature in data["features"]:
-        props = feature.get("properties", {})
-        nombre_muni = props.get("NOMBRE_MUNICIPIO", None)
-        nombre_prov = props.get("NOMBRE_PROVINCIA", None)
-        if nombre_muni and nombre_prov == provincia:
-            municipios.append(nombre_muni)
-    return sorted(list(set(municipios)))
-
-def get_distritos_por_municipio(municipio):
-    """
-    Retorna la lista de distritos municipales que pertenecen al municipio,
-    usando el GeoJSON de distritos.
-    """
-    if not municipio:
-        return []
-    data = st.session_state.get("geojson_distritos", {})
-    if not data or "features" not in data:
-        return []
-    distritos = []
-    for feature in data["features"]:
-        props = feature.get("properties", {})
-        nombre_dm = props.get("NOMBRE_DM", None)
-        nombre_muni = props.get("NOMBRE_MUNICIPIO", None)
-        if nombre_dm and nombre_muni == municipio:
-            distritos.append(nombre_dm)
-    return sorted(list(set(distritos)))
-
-def get_secciones_por_distrito(distrito):
-    """
-    Retorna la lista de secciones que pertenecen al distrito municipal,
-    usando el GeoJSON de secciones.
-    """
-    if not distrito:
-        return []
-    data = st.session_state.get("geojson_secciones", {})
-    if not data or "features" not in data:
-        return []
-    secciones = []
-    for feature in data["features"]:
-        props = feature.get("properties", {})
-        nombre_seccion = props.get("NOMBRE_SECCION", None)
-        nombre_dm = props.get("NOMBRE_DM", None)
-        if nombre_seccion and nombre_dm == distrito:
-            secciones.append(nombre_seccion)
-    return sorted(list(set(secciones)))
+        st.error(f"Error al obtener límite para {place_query}: {e}")
+    return None
 
 # -------------------------------
-# Funciones para obtener calles desde Overpass API
-# (Mantienen la lógica original)
+# Función para consultar calles a partir del bounding box en Overpass API
 # -------------------------------
-def build_overpass_query(provincia, municipio, distrito):
-    # Se construye la consulta utilizando la jerarquía: provincia > municipio > distrito
+def get_streets_by_bbox(bbox):
+    """
+    Consulta Overpass API para obtener calles (ways con tag highway y nombre)
+    dentro del bounding box especificado (south,west,north,east).
+    """
     query = f"""
     [out:json][timeout:25];
-    area["name"="{provincia}"]->.provincia;
-    area["name"="{municipio}"](area.provincia)->.municipio;
-    area["name"="{distrito}"](area.municipio)->.distrito;
     (
-      way(area.distrito)["highway"]["name"];
+      way["highway"]["name"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
     );
     out geom;
     """
-    return query
-
-def get_streets(provincia, municipio, distrito):
     url = "http://overpass-api.de/api/interpreter"
-    query = build_overpass_query(provincia, municipio, distrito)
     response = requests.post(url, data={'data': query})
     if response.status_code != 200:
         st.error("Error al consultar Overpass API")
@@ -229,8 +140,7 @@ def get_streets(provincia, municipio, distrito):
     return data["elements"]
 
 # -------------------------------
-# Funciones de asignación y mapeo
-# (Sin cambios en la lógica principal)
+# Funciones de asignación y mapeo (similar a la versión anterior)
 # -------------------------------
 def calculate_centroid(geometry):
     lats = [point["lat"] for point in geometry]
@@ -288,9 +198,11 @@ def generate_agent_colors(num_agents):
         colors[agent-1] = "#" + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
     return colors
 
-def create_map(assignments, mode, provincia, municipio, distrito, agent_colors):
-    # Se inicia el mapa centrado en República Dominicana con zoom_start=8.
-    m = folium.Map(location=[19.0, -70.0], zoom_start=8, tiles="cartodbpositron")
+def create_map(assignments, mode, bbox, agent_colors):
+    # Centrar el mapa en el centro del bounding box
+    center_lat = (bbox[0] + bbox[2]) / 2
+    center_lng = (bbox[1] + bbox[3]) / 2
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="cartodbpositron")
     for agent, streets in assignments.items():
         streets_ordered = reorder_cluster(streets.copy())
         feature_group = folium.FeatureGroup(name=f"Agente {agent+1}")
@@ -334,7 +246,7 @@ def create_map(assignments, mode, provincia, municipio, distrito, agent_colors):
     folium.LayerControl().add_to(m)
     return m
 
-def generate_dataframe(assignments, provincia, municipio, distrito):
+def generate_dataframe(assignments):
     rows = []
     for agent, streets in assignments.items():
         streets_ordered = reorder_cluster(streets.copy())
@@ -346,10 +258,6 @@ def generate_dataframe(assignments, provincia, municipio, distrito):
                 lat, lon = None, None
             rows.append({
                 "Calle": name,
-                "Provincia": provincia,
-                "Municipio": municipio,
-                "Distrito Municipal": distrito,
-                "País": "República Dominicana",
                 "Latitud": lat,
                 "Longitud": lon,
                 "Agente": agent + 1
@@ -379,124 +287,42 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
 
 # -------------------------------
 # Funciones de actualización de sesión
-# (Resetean niveles inferiores al cambiar uno superior)
 # -------------------------------
-def update_region():
-    st.session_state.provincia = None
-    st.session_state.municipio = None
-    st.session_state.distrito = None
-    st.session_state.seccion = None
+def update_division():
+    st.session_state.provincia = ""
+    st.session_state.municipio = ""
+    st.session_state.distrito = ""
+    st.session_state.seccion = ""
 
 def update_provincia():
-    st.session_state.municipio = None
-    st.session_state.distrito = None
-    st.session_state.seccion = None
+    st.session_state.municipio = ""
+    st.session_state.distrito = ""
+    st.session_state.seccion = ""
 
 def update_municipio():
-    st.session_state.distrito = None
-    st.session_state.seccion = None
+    st.session_state.distrito = ""
+    st.session_state.seccion = ""
 
 def update_distrito():
-    st.session_state.seccion = None
+    st.session_state.seccion = ""
 
 # -------------------------------
 # Interfaz en Streamlit
 # -------------------------------
 st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
-st.markdown("Esta aplicación utiliza **inteligencia artificial** para organizar y repartir las rutas de calles dentro de áreas delimitadas a nivel de región, provincia, municipio, distrito municipal y sección.")
-
-# Cargar los GeoJSON en sesión (solo la primera vez)
-if "geojson_regiones" not in st.session_state:
-    st.session_state["geojson_regiones"] = load_geojson(REGION_GEOJSON_URL)
-if "geojson_provincias" not in st.session_state:
-    st.session_state["geojson_provincias"] = load_geojson(PROVINCE_GEOJSON_URL)
-if "geojson_municipios" not in st.session_state:
-    st.session_state["geojson_municipios"] = load_geojson(MUNICIPIO_GEOJSON_URL)
-if "geojson_distritos" not in st.session_state:
-    st.session_state["geojson_distritos"] = load_geojson(DISTRITO_GEOJSON_URL)
-if "geojson_secciones" not in st.session_state:
-    st.session_state["geojson_secciones"] = load_geojson(SECCION_GEOJSON_URL)
+st.markdown("Esta aplicación utiliza **Google Places API** para delimitar el área y **OpenStreetMap** para obtener las calles, reduciendo costos.")
 
 st.sidebar.header("Configuración de GEO AGENT")
 
-# 1. Selección de Región
-regiones = get_regiones()
-region = None  # Aseguramos que 'region' exista siempre
-if not regiones:
-    st.error("No se pudo obtener la lista de regiones.")
-else:
-    if "region" not in st.session_state:
-        st.session_state.region = regiones[0]
-    region = st.sidebar.selectbox(
-        "Seleccione la región:",
-        regiones,
-        index=regiones.index(st.session_state.region),
-        key="region",
-        on_change=update_region
-    )
+# Para simplificar, asumimos que la Región es República Dominicana
+region = "República Dominicana"
+st.sidebar.markdown(f"**Región:** {region}")
 
-# 2. Selección de Provincia
-provincias = get_provincias_por_region(region) if region else []
-provincia = None
-if provincias:
-    if "provincia" not in st.session_state or st.session_state.provincia not in provincias:
-        st.session_state.provincia = provincias[0]
-    provincia = st.sidebar.selectbox(
-        "Seleccione la provincia:",
-        provincias,
-        index=provincias.index(st.session_state.provincia),
-        key="provincia",
-        on_change=update_provincia
-    )
-else:
-    st.warning("No se encontraron provincias para la región seleccionada.")
-
-# 3. Selección de Municipio
-municipios = get_municipios_por_provincia(provincia) if provincia else []
-municipio = None
-if municipios:
-    if "municipio" not in st.session_state or st.session_state.municipio not in municipios:
-        st.session_state.municipio = municipios[0]
-    municipio = st.sidebar.selectbox(
-        "Seleccione el municipio:",
-        municipios,
-        index=municipios.index(st.session_state.municipio),
-        key="municipio",
-        on_change=update_municipio
-    )
-else:
-    st.warning("No se encontraron municipios para la provincia seleccionada.")
-
-# 4. Selección de Distrito Municipal
-distritos = get_distritos_por_municipio(municipio) if municipio else []
-distrito = None
-if distritos:
-    if "distrito" not in st.session_state or st.session_state.distrito not in distritos:
-        st.session_state.distrito = distritos[0]
-    distrito = st.sidebar.selectbox(
-        "Seleccione el Distrito Municipal:",
-        distritos,
-        index=distritos.index(st.session_state.distrito),
-        key="distrito",
-        on_change=update_distrito
-    )
-else:
-    st.warning("No se encontraron distritos municipales para el municipio seleccionado.")
-
-# 5. Selección de Sección
-secciones = get_secciones_por_distrito(distrito) if distrito else []
-seccion = None
-if secciones:
-    if "seccion" not in st.session_state or st.session_state.seccion not in secciones:
-        st.session_state.seccion = secciones[0]
-    seccion = st.sidebar.selectbox(
-        "Seleccione la Sección:",
-        secciones,
-        index=secciones.index(st.session_state.seccion),
-        key="seccion"
-    )
-else:
-    st.warning("No se encontraron secciones para el distrito seleccionado.")
+# El usuario ingresa los siguientes niveles administrativos
+provincia = st.sidebar.text_input("Ingrese la Provincia:", value=st.session_state.get("provincia", ""), key="provincia", on_change=update_provincia)
+municipio = st.sidebar.text_input("Ingrese el Municipio:", value=st.session_state.get("municipio", ""), key="municipio", on_change=update_municipio)
+distrito = st.sidebar.text_input("Ingrese el Distrito Municipal:", value=st.session_state.get("distrito", ""), key="distrito", on_change=update_distrito)
+seccion = st.sidebar.text_input("Ingrese la Sección:", value=st.session_state.get("seccion", ""), key="seccion")
 
 # Número de agentes y modo de visualización
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
@@ -507,26 +333,35 @@ if "resultado" not in st.session_state:
 
 # Botón para generar asignación de calles
 if st.sidebar.button("Generar asignación"):
-    with st.spinner("Consultando Overpass API para obtener calles..."):
-        # Se usa la provincia, municipio y distrito seleccionados.
-        streets = get_streets(provincia, municipio, distrito) if (provincia and municipio and distrito) else None
-    if streets:
-        assignments = assign_streets_cluster(streets, num_agents)
-        agent_colors = generate_agent_colors(num_agents)
-        mapa = create_map(assignments, mode, provincia, municipio, distrito, agent_colors)
-        df = generate_dataframe(assignments, provincia, municipio, distrito)
-        order_list = []
-        for agent, streets_assigned in assignments.items():
-            streets_ordered = reorder_cluster(streets_assigned.copy())
-            for i, street in enumerate(streets_ordered):
-                order_list.append(i+1)
-        if len(order_list) == len(df):
-            df["Order"] = order_list
-        st.session_state.resultado = {"mapa": mapa, "dataframe": df}
-        st.session_state.assignments = assignments
-        st.session_state.agent_colors = agent_colors
+    # Construir la dirección completa a partir de los niveles
+    address_components = [seccion, distrito, municipio, provincia, region]
+    # Solo se incluyen componentes no vacíos
+    address_full = ", ".join([comp for comp in address_components if comp])
+    st.write(f"**Consultando límites para:** {address_full}")
+    bbox = get_boundary(address_full)
+    if bbox:
+        st.write(f"Bounding Box: {bbox}")
+        with st.spinner("Consultando Overpass API para obtener calles..."):
+            streets = get_streets_by_bbox(bbox)
+        if streets:
+            assignments = assign_streets_cluster(streets, num_agents)
+            agent_colors = generate_agent_colors(num_agents)
+            mapa = create_map(assignments, mode, bbox, agent_colors)
+            df = generate_dataframe(assignments)
+            order_list = []
+            for agent, streets_assigned in assignments.items():
+                streets_ordered = reorder_cluster(streets_assigned.copy())
+                for i, street in enumerate(streets_ordered):
+                    order_list.append(i+1)
+            if len(order_list) == len(df):
+                df["Order"] = order_list
+            st.session_state.resultado = {"mapa": mapa, "dataframe": df}
+            st.session_state.assignments = assignments
+            st.session_state.agent_colors = agent_colors
+        else:
+            st.session_state.resultado = None
     else:
-        st.session_state.resultado = None
+        st.error("No se pudo obtener el límite del área seleccionada.")
 
 # Mostrar resultados
 if st.session_state.resultado:
@@ -541,14 +376,7 @@ if st.session_state.resultado:
     else:
         assignments_filtradas = assignments_dict
     
-    mapa_filtrado = create_map(
-        assignments_filtradas, 
-        mode, 
-        provincia, 
-        municipio, 
-        distrito, 
-        st.session_state.get("agent_colors", {})
-    )
+    mapa_filtrado = create_map(assignments_filtradas, mode, bbox, st.session_state.get("agent_colors", {}))
     
     st.subheader("Mapa de asignaciones")
     mapa_html = mapa_filtrado._repr_html_()
