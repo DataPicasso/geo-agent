@@ -10,7 +10,7 @@ from geopy.distance import geodesic
 import numpy as np
 
 # -------------------------------
-# Estilos personalizados (tema oscuro)
+# Estilos personalizados (tema oscuro original)
 # -------------------------------
 st.markdown(
     """
@@ -330,8 +330,11 @@ def update_provincia():
 # -------------------------------
 # Interfaz en Streamlit
 # -------------------------------
-st.title("Asignación de Calles a Agentes en República Dominicana")
-st.sidebar.header("Configuración")
+# Actualizamos los textos de título y subtítulos para reflejar el concepto de GEO AGENT
+st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
+st.markdown("Esta aplicación utiliza **inteligencia artificial** para organizar y repartir las rutas de calles en República Dominicana, optimizando la distribución entre los agentes geográficos.")
+
+st.sidebar.header("Configuración de GEO AGENT")
 
 provincias = get_provincias()
 if not provincias:
@@ -354,7 +357,7 @@ else:
         st.warning("No se encontraron ciudades para la provincia seleccionada.")
 
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
-mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"])
+mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
 
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
@@ -441,12 +444,12 @@ footer = """
     left: 0;
     bottom: 0;
     width: 100%;
-    background-color: #e3f2fd;
+    background-color: #1e1e1e;
     text-align: center;
     padding: 10px 0;
     font-size: 14px;
-    color: #333;
-    border-top: 1px solid #ccc;
+    color: #e0e0e0;
+    border-top: 1px solid #333333;
 }
 </style>
 <div class="footer">
