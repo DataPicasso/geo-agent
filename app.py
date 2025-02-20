@@ -5,6 +5,9 @@ import folium
 import random
 from shapely.geometry import MultiPoint, Polygon
 from io import BytesIO  # Para el manejo del Excel en memoria
+from sklearn.cluster import KMeans
+from geopy.distance import geodesic
+import numpy as np
 
 # -------------------------------
 # Funciones para obtener provincias y ciudades dinámicamente desde Overpass API
@@ -51,7 +54,7 @@ def get_ciudades(provincia):
     return sorted(list(set(ciudades)))
 
 # -------------------------------
-# Funciones para generar calles y asignación
+# Funciones para generar calles y asignación optimizada
 # -------------------------------
 
 def build_overpass_query(provincia, ciudad):
@@ -84,20 +87,59 @@ def calculate_centroid(geometry):
     lons = [point["lon"] for point in geometry]
     return sum(lats) / len(lats), sum(lons) / len(lons)
 
-def assign_streets(streets, num_agents):
-    assignments = {}
-    for agent in range(1, num_agents+1):
-        assignments[agent] = []
-    for i, street in enumerate(streets):
-        agent = (i % num_agents) + 1
-        assignments[agent].append(street)
+def assign_streets_cluster(streets, num_agents):
+    """
+    Convierte la lista de calles en un DataFrame con las coordenadas (centroide de cada calle)
+    y aplica KMeans para agruparlas en num_agents clusters.
+    Luego retorna un diccionario con cada cluster asignado a un agente.
+    """
+    data = []
+    indices = []
+    for idx, street in enumerate(streets):
+        if "geometry" in street and len(street["geometry"]) > 0:
+            lat, lon = calculate_centroid(street["geometry"])
+            data.append([lat, lon])
+            indices.append(idx)
+    if not data:
+        return {}
+    data = np.array(data)
+    kmeans = KMeans(n_clusters=num_agents, n_init=10, random_state=42).fit(data)
+    labels = kmeans.labels_
+    assignments = { i: [] for i in range(num_agents) }
+    for label, idx in zip(labels, indices):
+        assignments[label].append(streets[idx])
     return assignments
 
-def generate_agent_colors(num_agents):
-    colors = {}
-    for agent in range(1, num_agents+1):
-        colors[agent] = "#" + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
-    return colors
+def reorder_cluster(cluster_streets):
+    """
+    Reordena la lista de calles (dentro de un cluster) usando un algoritmo de vecino más cercano.
+    """
+    if len(cluster_streets) < 2:
+        return cluster_streets
+    # Inicia con el primer elemento
+    ordered = [cluster_streets.pop(0)]
+    while cluster_streets:
+        last = ordered[-1]
+        last_coord = calculate_centroid(last["geometry"]) if "geometry" in last and len(last["geometry"]) > 0 else None
+        if not last_coord:
+            break
+        best = None
+        best_dist = float('inf')
+        best_index = None
+        for i, street in enumerate(cluster_streets):
+            if "geometry" in street and len(street["geometry"]) > 0:
+                coord = calculate_centroid(street["geometry"])
+                d = geodesic(last_coord, coord).km
+                if d < best_dist:
+                    best_dist = d
+                    best = street
+                    best_index = i
+        if best is not None:
+            ordered.append(best)
+            cluster_streets.pop(best_index)
+        else:
+            break
+    return ordered
 
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
     all_centroids = []
@@ -115,20 +157,22 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
     avg_lon = sum(pt[1] for pt in all_centroids) / len(all_centroids)
     m = folium.Map(location=[avg_lat, avg_lon], zoom_start=13, tiles="cartodbpositron")
     for agent, streets in assignments.items():
-        feature_group = folium.FeatureGroup(name=f"Agente {agent}")
+        # Reordena cada cluster para obtener una ruta coherente
+        streets_ordered = reorder_cluster(streets.copy())
+        feature_group = folium.FeatureGroup(name=f"Agente {agent+1}")
         if mode == "Calles":
-            for street in streets:
+            for street in streets_ordered:
                 if "geometry" in street:
                     coords = [(pt["lat"], pt["lon"]) for pt in street["geometry"]]
                     folium.PolyLine(
                         coords,
-                        color=agent_colors[agent],
+                        color=agent_colors.get(agent, "#000000"),
                         weight=4,
                         tooltip=street.get("tags", {}).get("name", "Sin nombre")
                     ).add_to(feature_group)
         elif mode == "Área":
             points = []
-            for street in streets:
+            for street in streets_ordered:
                 if "geometry" in street:
                     for pt in street["geometry"]:
                         points.append((pt["lon"], pt["lat"]))
@@ -144,22 +188,25 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
                                     "coordinates": [list(polygon.exterior.coords)]
                                 }
                             },
-                            style_function=lambda x, col=agent_colors[agent]: {
+                            style_function=lambda x, col=agent_colors.get(agent, "#000000"): {
                                 "fillColor": col,
                                 "color": col,
                                 "fillOpacity": 0.4
                             }
                         ).add_to(feature_group)
                 except Exception as e:
-                    st.error(f"Error al calcular el área para el Agente {agent}: {e}")
+                    st.error(f"Error al calcular el área para el Agente {agent+1}: {e}")
         feature_group.add_to(m)
     folium.LayerControl().add_to(m)
     return m
 
 def generate_dataframe(assignments, provincia, ciudad):
     rows = []
+    # Se guardará la información de cada calle con sus coordenadas (calculadas) y asignación
     for agent, streets in assignments.items():
-        for street in streets:
+        # Reordena la lista para reflejar la ruta
+        streets_ordered = reorder_cluster(streets.copy())
+        for street in streets_ordered:
             name = street.get("tags", {}).get("name", "Sin nombre")
             if "geometry" in street and len(street["geometry"]) > 0:
                 lat, lon = calculate_centroid(street["geometry"])
@@ -172,7 +219,7 @@ def generate_dataframe(assignments, provincia, ciudad):
                 "País": "República Dominicana",
                 "Latitud": lat,
                 "Longitud": lon,
-                "Agente": agent
+                "Agente": agent + 1  # Se muestra 1-indexado
             })
     return pd.DataFrame(rows)
 
@@ -215,16 +262,17 @@ mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
-# Al generar la asignación se guardan también 'assignments' y 'agent_colors' en session_state
+# Al generar la asignación se guardan 'assignments' y 'agent_colors' en session_state
 if st.sidebar.button("Generar asignación"):
     with st.spinner("Consultando Overpass API para obtener calles..."):
         streets = get_streets(provincia, ciudad)
     if streets:
-        assignments = assign_streets(streets, num_agents)
+        # Se usa la nueva asignación basada en clustering y proximidad
+        assignments = assign_streets_cluster(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
-        folium_map = create_map(assignments, mode, provincia, ciudad, agent_colors)
+        mapa = create_map(assignments, mode, provincia, ciudad, agent_colors)
         df = generate_dataframe(assignments, provincia, ciudad)
-        st.session_state.resultado = {"mapa": folium_map, "dataframe": df}
+        st.session_state.resultado = {"mapa": mapa, "dataframe": df}
         st.session_state.assignments = assignments
         st.session_state.agent_colors = agent_colors
     else:
@@ -232,13 +280,13 @@ if st.sidebar.button("Generar asignación"):
 
 if st.session_state.resultado:
     st.subheader("Filtro de Agente")
-    # Opciones: "Todos" o agentes disponibles en session_state.assignments
+    # Opciones: "Todos" o agentes disponibles (se muestran como 1-indexados)
     assignments_dict = st.session_state.get("assignments", {})
-    filtro_opciones = ["Todos"] + [str(i) for i in assignments_dict.keys()]
+    filtro_opciones = ["Todos"] + [str(i+1) for i in assignments_dict.keys()]
     agente_filtrar = st.sidebar.selectbox("Filtrar por agente:", options=filtro_opciones, key="agent_filter")
     
     if agente_filtrar != "Todos":
-        agente_seleccionado = int(agente_filtrar)
+        agente_seleccionado = int(agente_filtrar) - 1  # Convertir a 0-indexado
         assignments_filtradas = { agente_seleccionado: assignments_dict.get(agente_seleccionado, []) }
     else:
         assignments_filtradas = assignments_dict
