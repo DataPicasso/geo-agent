@@ -5,6 +5,7 @@ import folium
 import random
 from streamlit_folium import st_folium
 from shapely.geometry import MultiPoint, Polygon
+from io import BytesIO  # Nueva importación para el manejo del Excel en memoria
 
 # -------------------------------
 # Funciones para obtener provincias y ciudades dinámicamente desde Overpass API
@@ -232,7 +233,10 @@ if st.sidebar.button("Generar asignación"):
         st.subheader("Datos asignados")
         st.dataframe(df)
         
-        # Convertir DataFrame a Excel para descarga
-        to_excel = df.to_excel(index=False, engine='openpyxl')
-        st.download_button(label="Descargar Excel", data=to_excel,
-                           file_name="asignacion_calles.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # Convertir DataFrame a Excel usando BytesIO para descarga
+        output = BytesIO()
+        df.to_excel(output, index=False, engine='openpyxl')
+        output.seek(0)
+        st.download_button(label="Descargar Excel", data=output,
+                           file_name="asignacion_calles.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
