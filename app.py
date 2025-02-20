@@ -89,9 +89,8 @@ def calculate_centroid(geometry):
 
 def assign_streets_cluster(streets, num_agents):
     """
-    Convierte la lista de calles en un DataFrame con las coordenadas (centroide de cada calle)
-    y aplica KMeans para agruparlas en num_agents clusters.
-    Luego retorna un diccionario con cada cluster asignado a un agente.
+    Agrupa las calles mediante KMeans (utilizando el centroide de cada calle)
+    en num_agents clusters. Retorna un diccionario con cada cluster asignado a un agente.
     """
     data = []
     indices = []
@@ -112,7 +111,7 @@ def assign_streets_cluster(streets, num_agents):
 
 def reorder_cluster(cluster_streets):
     """
-    Reordena la lista de calles (dentro de un cluster) usando un algoritmo de vecino más cercano.
+    Reordena la lista de calles dentro de un cluster usando un algoritmo de vecino más cercano.
     """
     if len(cluster_streets) < 2:
         return cluster_streets
@@ -148,22 +147,9 @@ def generate_agent_colors(num_agents):
     return colors
 
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
-    all_centroids = []
-    for streets in assignments.values():
-        for street in streets:
-            if "geometry" in street and len(street["geometry"]) > 0:
-                cent = calculate_centroid(street["geometry"])
-                all_centroids.append(cent)
-    if not all_centroids:
-        st.warning("No se encontraron coordenadas de calles. Mostrando mapa base de RD.")
-        default_lat, default_lon = 19.0, -70.0
-        m = folium.Map(location=[default_lat, default_lon], zoom_start=8, tiles="cartodbpositron")
-        return m
-    avg_lat = sum(pt[0] for pt in all_centroids) / len(all_centroids)
-    avg_lon = sum(pt[1] for pt in all_centroids) / len(all_centroids)
-    m = folium.Map(location=[avg_lat, avg_lon], zoom_start=13, tiles="cartodbpositron")
+    # Para mostrar inicialmente la República Dominicana, usaremos ubicación fija y zoom_start=8.
+    m = folium.Map(location=[19.0, -70.0], zoom_start=8, tiles="cartodbpositron")
     for agent, streets in assignments.items():
-        # Reordena cada cluster para obtener una ruta coherente
         streets_ordered = reorder_cluster(streets.copy())
         feature_group = folium.FeatureGroup(name=f"Agente {agent+1}")
         if mode == "Calles":
