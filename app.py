@@ -38,13 +38,13 @@ def get_provincias():
 @st.cache_data
 def get_ciudades(provincia):
     """
-    Consulta Overpass API para obtener las ciudades o poblados (tags: place=city o place=town)
-    dentro de la provincia seleccionada.
+    Consulta Overpass API para obtener las ciudades, pueblos o poblados
+    (tags: place=city|town|village) dentro de la provincia seleccionada.
     """
     query = f"""
     [out:json];
     area["name"="{provincia}"]->.province;
-    node(area.province)["place"~"^(city|town)$"];
+    node(area.province)["place"~"^(city|town|village)$"];
     out;
     """
     url = "http://overpass-api.de/api/interpreter"
@@ -61,12 +61,11 @@ def get_ciudades(provincia):
     return sorted(list(set(ciudades)))
 
 # -------------------------------
-# Funciones ya existentes para el generador de calles y asignación
+# Funciones para generar calles y asignación
 # -------------------------------
 
 # Función para construir la consulta Overpass API de calles
 def build_overpass_query(provincia, ciudad):
-    # La consulta busca el área de la provincia y luego filtra la ciudad dentro de ella
     query = f"""
     [out:json][timeout:25];
     area["name"="{provincia}"]->.province;
@@ -118,21 +117,29 @@ def generate_agent_colors(num_agents):
 
 # Función para crear un mapa Folium con la visualización
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
-    # Centrar el mapa en la ciudad (usaremos el centroide de todas las calles)
+    """
+    Retorna siempre un objeto folium.Map, aunque no haya calles.
+    Si no se encuentra ninguna coordenada, se centra en una ubicación por defecto.
+    """
     all_centroids = []
     for streets in assignments.values():
         for street in streets:
             if "geometry" in street and len(street["geometry"]) > 0:
                 cent = calculate_centroid(street["geometry"])
                 all_centroids.append(cent)
-    if not all_centroids:
-        st.warning("No se pudieron calcular coordenadas para centrar el mapa.")
-        return None
 
-    avg_lat = sum([pt[0] for pt in all_centroids]) / len(all_centroids)
-    avg_lon = sum([pt[1] for pt in all_centroids]) / len(all_centroids)
-    
-    # Se agrega tiles="cartodbpositron" para evitar fondo oscuro en modo oscuro
+    # Si no hay coordenadas, usar un centro por defecto (aprox. RD)
+    if not all_centroids:
+        st.warning("No se encontraron coordenadas de calles. Mostrando mapa base.")
+        default_lat, default_lon = 19.0, -70.0  # Centro aproximado de RD
+        m = folium.Map(location=[default_lat, default_lon], zoom_start=8, tiles="cartodbpositron")
+        return m
+
+    # Calcular punto promedio de todas las coordenadas
+    avg_lat = sum(pt[0] for pt in all_centroids) / len(all_centroids)
+    avg_lon = sum(pt[1] for pt in all_centroids) / len(all_centroids)
+
+    # Crear mapa centrado
     m = folium.Map(location=[avg_lat, avg_lon], zoom_start=13, tiles="cartodbpositron")
     
     # Crear capas para cada agente
@@ -159,7 +166,6 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
             if points:
                 try:
                     polygon = MultiPoint(points).convex_hull
-                    # Asegurarse de que se trata de un polígono válido
                     if isinstance(polygon, Polygon):
                         folium.GeoJson(
                             data={
@@ -235,17 +241,19 @@ if st.sidebar.button("Generar asignación"):
         assignments = assign_streets(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
         
-        # Crear el mapa interactivo
+        # Crear el mapa interactivo (nunca será None)
         folium_map = create_map(assignments, mode, provincia, ciudad, agent_colors)
-        if folium_map:
-            st.subheader("Mapa de asignaciones")
-            st_folium(folium_map, width=700, height=500)
         
-            # Generar DataFrame para exportar a Excel
-            df = generate_dataframe(assignments, provincia)
+        # Mostrar el mapa
+        st.subheader("Mapa de asignaciones")
+        map_render = st_folium(folium_map, width=700, height=500)
+
+        # Generar DataFrame para exportar a Excel
+        df = generate_dataframe(assignments, provincia)
+        if not df.empty:
             st.subheader("Datos asignados")
             st.dataframe(df)
-            
+
             # Convertir DataFrame a Excel usando BytesIO para descarga
             output = BytesIO()
             df.to_excel(output, index=False, engine='openpyxl')
@@ -257,6 +265,6 @@ if st.sidebar.button("Generar asignación"):
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("No se pudo crear el mapa. Verifique que existan datos geográficos.")
+            st.warning("No se encontraron datos de calles para exportar.")
     else:
         st.warning("No se encontraron datos de calles para la provincia y ciudad seleccionadas.")
