@@ -1,11 +1,10 @@
 import streamlit as st
-import googlemaps
 import requests
 import pandas as pd
 import folium
 import random
 from shapely.geometry import MultiPoint, Polygon
-from io import BytesIO
+from io import BytesIO  # Para el manejo del Excel en memoria
 from sklearn.cluster import KMeans
 from geopy.distance import geodesic
 import numpy as np
@@ -83,64 +82,205 @@ st.markdown(
 )
 
 # -------------------------------
-# Configuración de la API de Google (Places API NEW)
+# Funciones para obtener divisiones administrativas desde Overpass API
+# (Para Municipios y Distritos se mantienen las funciones originales)
 # -------------------------------
-# La clave se obtiene desde st.secrets (configurada en Streamlit Cloud)
-GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-gmaps = googlemaps.Client(key=GOOGLE_API_KEY)
+def get_provincias():
+    # En este caso la lista de provincias se obtiene del Excel, por lo que esta función ya no se utiliza para el listado
+    query = """
+    [out:json];
+    area["name"="República Dominicana"]->.country;
+    rel(area.country)["admin_level"="4"]["boundary"="administrative"];
+    out tags;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar las provincias en Overpass API")
+        return []
+    data = response.json()
+    provincias = []
+    for element in data.get("elements", []):
+        name = element.get("tags", {}).get("name")
+        if name:
+            provincias.append(name)
+    return sorted(list(set(provincias)))
+
+def get_municipios(provincia):
+    query = f"""
+    [out:json];
+    area["name"="República Dominicana"]->.country;
+    area["name"="{provincia}"](area.country)->.provincia;
+    rel(area.provincia)["admin_level"="8"]["boundary"="administrative"];
+    out tags;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar los municipios en Overpass API")
+        return []
+    data = response.json()
+    municipios = []
+    for element in data.get("elements", []):
+        name = element.get("tags", {}).get("name")
+        if name:
+            municipios.append(name)
+    return sorted(list(set(municipios)))
+
+def get_distritos(municipio):
+    query = f"""
+    [out:json];
+    area["name"="República Dominicana"]->.country;
+    rel(area.country)["name"="{municipio}"]["admin_level"="8"];
+    out tags;
+    area["name"="{municipio}"]->.municipio;
+    rel(area.municipio)["admin_level"="9"]["boundary"="administrative"];
+    out tags;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar los distritos municipales en Overpass API")
+        return []
+    data = response.json()
+    distritos = []
+    for element in data.get("elements", []):
+        name = element.get("tags", {}).get("name")
+        if name:
+            distritos.append(name)
+    return sorted(list(set(distritos)))
 
 # -------------------------------
-# Funciones para obtener límites administrativos con Google Places API
+# Constantes para GeoJSON y archivo Excel de división territorial
 # -------------------------------
-def get_boundary(place_query):
-    """
-    Consulta la Places API (geocode) para obtener la geometría (bounds o viewport)
-    del lugar especificado.
-    Retorna una tupla (south, west, north, east) o None si no se encuentra.
-    """
+DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
+
+PROVINCE_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_PROV&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
+MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_MUNICIPIOS&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
+DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_DM&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
+SECCION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_SECCIONES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
+BARRIOS_PARAJES_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_BPARAJES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
+
+# -------------------------------
+# Funciones para cargar y filtrar GeoJSON
+# -------------------------------
+def load_geojson(url):
     try:
-        geocode_result = gmaps.geocode(place_query)
-        if geocode_result:
-            geometry = geocode_result[0].get("geometry", {})
-            # Preferimos 'bounds', sino usamos 'viewport'
-            bounds = geometry.get("bounds") or geometry.get("viewport")
-            if bounds:
-                northeast = bounds.get("northeast")
-                southwest = bounds.get("southwest")
-                if northeast and southwest:
-                    return (southwest["lat"], southwest["lng"], northeast["lat"], northeast["lng"])
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al cargar GeoJSON desde: {url}")
     except Exception as e:
-        st.error(f"Error al obtener límite para {place_query}: {e}")
+        st.error(f"Excepción al cargar GeoJSON: {e}")
+    return {}
+
+def filter_feature(geojson_data, value):
+    if not geojson_data.get("features"):
+        return None
+    for feature in geojson_data["features"]:
+        props = feature.get("properties", {})
+        if "TOPONIMIA" in props:
+            if props["TOPONIMIA"].strip().upper() == value.strip().upper():
+                return feature
     return None
 
-# -------------------------------
-# Función para consultar calles a partir del bounding box en Overpass API
-# -------------------------------
-def get_streets_by_bbox(bbox):
+def get_boundary(selected_region, selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio):
+    boundary = None
+    # Si se seleccionó Barrio, usar su GeoJSON
+    if selected_barrio and selected_barrio != "Todos":
+        data = load_geojson(BARRIOS_PARAJES_URL)
+        feature = filter_feature(data, selected_barrio)
+        if feature:
+            boundary = feature.get("geometry")
+    # Si no, Sección
+    if not boundary and selected_secc and selected_secc != "Todos":
+        data = load_geojson(SECCION_GEOJSON_URL)
+        feature = filter_feature(data, selected_secc)
+        if feature:
+            boundary = feature.get("geometry")
+    # Si no, Distrito Municipal
+    if not boundary and selected_dist and selected_dist != "Todos":
+        data = load_geojson(DISTRITO_GEOJSON_URL)
+        feature = filter_feature(data, selected_dist)
+        if feature:
+            boundary = feature.get("geometry")
+    # Si no, Municipio
+    if not boundary and selected_muni and selected_muni != "Todos":
+        data = load_geojson(MUNICIPIO_GEOJSON_URL)
+        feature = filter_feature(data, selected_muni)
+        if feature:
+            boundary = feature.get("geometry")
+    # Por último, Provincia: se obtiene la ubicación geoespacial de OSM
+    if not boundary and selected_prov and selected_prov != "Todos":
+        boundary = get_province_boundary(selected_prov)
+    return boundary
+
+def get_province_boundary(provincia):
     """
-    Consulta Overpass API para obtener calles (ways con tag highway y nombre)
-    dentro del bounding box especificado (south,west,north,east).
+    Consulta Overpass API para obtener la demarcación (geometry) de la provincia.
+    Se utiliza una consulta que retorna el primer elemento con boundary administrativo (admin_level=4).
     """
     query = f"""
     [out:json][timeout:25];
+    area["name"="República Dominicana"]->.country;
+    area["name"="{provincia}"](area.country)->.provincia;
     (
-      way["highway"]["name"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
+      relation(area.provincia)["boundary"="administrative"]["admin_level"="4"];
     );
     out geom;
     """
     url = "http://overpass-api.de/api/interpreter"
     response = requests.post(url, data={'data': query})
     if response.status_code != 200:
-        st.error("Error al consultar Overpass API")
+        st.error("Error al consultar el límite de la provincia en Overpass API")
         return None
     data = response.json()
     if "elements" not in data or len(data["elements"]) == 0:
-        st.warning("No se encontraron calles en el área especificada.")
+        st.warning("No se encontró el límite para la provincia seleccionada.")
+        return None
+    element = data["elements"][0]
+    if "geometry" in element:
+        coords = [(pt["lon"], pt["lat"]) for pt in element["geometry"]]
+        polygon = {
+            "type": "Polygon",
+            "coordinates": [coords]
+        }
+        return polygon
+    return None
+
+def build_overpass_query_polygon(geometry):
+    if geometry["type"] != "Polygon":
+        st.error("La geometría no es un polígono válido para la consulta.")
+        return ""
+    coords = []
+    for coord in geometry["coordinates"][0]:
+        coords.append(f"{coord[1]} {coord[0]}")
+    poly_string = " ".join(coords)
+    query = f"""
+    [out:json][timeout:25];
+    (
+      way["highway"]["name"](poly:"{poly_string}");
+    );
+    out geom;
+    """
+    return query
+
+def get_streets_by_polygon(boundary):
+    url = "http://overpass-api.de/api/interpreter"
+    query = build_overpass_query_polygon(boundary)
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar Overpass API con perímetro.")
+        return None
+    data = response.json()
+    if "elements" not in data or len(data["elements"]) == 0:
+        st.warning("No se encontraron calles en el perímetro especificado.")
         return None
     return data["elements"]
 
 # -------------------------------
-# Funciones de asignación y mapeo (similar a la versión anterior)
+# Funciones originales para asignación, clustering y mapeo (sin modificaciones)
 # -------------------------------
 def calculate_centroid(geometry):
     lats = [point["lat"] for point in geometry]
@@ -198,11 +338,14 @@ def generate_agent_colors(num_agents):
         colors[agent-1] = "#" + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
     return colors
 
-def create_map(assignments, mode, bbox, agent_colors):
-    # Centrar el mapa en el centro del bounding box
-    center_lat = (bbox[0] + bbox[2]) / 2
-    center_lng = (bbox[1] + bbox[3]) / 2
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="cartodbpositron")
+def create_map(assignments, mode, boundary, agent_colors):
+    if boundary and boundary["type"] == "Polygon":
+        lats = [pt[1] for pt in boundary["coordinates"][0]]
+        lons = [pt[0] for pt in boundary["coordinates"][0]]
+        center = [sum(lats)/len(lats), sum(lons)/len(lons)]
+    else:
+        center = [19.0, -70.0]
+    m = folium.Map(location=center, zoom_start=13, tiles="cartodbpositron")
     for agent, streets in assignments.items():
         streets_ordered = reorder_cluster(streets.copy())
         feature_group = folium.FeatureGroup(name=f"Agente {agent+1}")
@@ -246,7 +389,7 @@ def create_map(assignments, mode, bbox, agent_colors):
     folium.LayerControl().add_to(m)
     return m
 
-def generate_dataframe(assignments):
+def generate_dataframe(assignments, selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio):
     rows = []
     for agent, streets in assignments.items():
         streets_ordered = reorder_cluster(streets.copy())
@@ -258,6 +401,12 @@ def generate_dataframe(assignments):
                 lat, lon = None, None
             rows.append({
                 "Calle": name,
+                "Provincia": selected_prov,
+                "Municipio": selected_muni,
+                "Distrito Municipal": selected_dist,
+                "Sección": selected_secc,
+                "Barrio": selected_barrio,
+                "País": "República Dominicana",
                 "Latitud": lat,
                 "Longitud": lon,
                 "Agente": agent + 1
@@ -285,69 +434,72 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
                            for date, group in zip(working_dates, groups)]
     return schedule
 
-# -------------------------------
-# Funciones de actualización de sesión
-# -------------------------------
-def update_division():
-    st.session_state.provincia = ""
-    st.session_state.municipio = ""
-    st.session_state.distrito = ""
-    st.session_state.seccion = ""
-
 def update_provincia():
-    st.session_state.municipio = ""
-    st.session_state.distrito = ""
-    st.session_state.seccion = ""
+    st.session_state.municipio = None
+    st.session_state.distrito = None
 
 def update_municipio():
-    st.session_state.distrito = ""
-    st.session_state.seccion = ""
-
-def update_distrito():
-    st.session_state.seccion = ""
+    st.session_state.distrito = None
 
 # -------------------------------
-# Interfaz en Streamlit
+# Cargar el archivo Excel con la división territorial
+# -------------------------------
+@st.cache_data
+def load_division_excel():
+    try:
+        df_div = pd.read_excel(DIVISION_XLSX_URL)
+        return df_div
+    except Exception as e:
+        st.error(f"Error al cargar el archivo Excel: {e}")
+        return pd.DataFrame()
+
+df_division = load_division_excel()
+
+# Crear listas únicas para cada nivel a partir del Excel
+regiones = sorted(df_division["Región"].dropna().unique().tolist()) if "Región" in df_division.columns else []
+provincias = sorted(df_division["Provincia"].dropna().unique().tolist()) if "Provincia" in df_division.columns else []
+municipios = sorted(df_division["Municipio"].dropna().unique().tolist()) if "Municipio" in df_division.columns else []
+distritos = sorted(df_division["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_division.columns else []
+secciones = sorted(df_division["Sección"].dropna().unique().tolist()) if "Sección" in df_division.columns else []
+barrios = sorted(df_division["Barrio"].dropna().unique().tolist()) if "Barrio" in df_division.columns else []
+
+# -------------------------------
+# Interfaz en Streamlit (FILTROS DINÁMICOS)
 # -------------------------------
 st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
-st.markdown("Esta aplicación utiliza **Google Places API** para delimitar el área y **OpenStreetMap** para obtener las calles, reduciendo costos.")
+st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
 
-st.sidebar.header("Configuración de GEO AGENT")
+st.sidebar.header("Configuración de Filtros Dinámicos")
 
-# Para simplificar, asumimos que la Región es República Dominicana
-region = "República Dominicana"
-st.sidebar.markdown(f"**Región:** {region}")
+selected_region = st.sidebar.selectbox("Seleccione la Región:", ["Todos"] + regiones, index=0)
+selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias, index=0)
+selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios, index=0)
+selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos, index=0)
+selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones, index=0)
+selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios, index=0)
 
-# El usuario ingresa los siguientes niveles administrativos
-provincia = st.sidebar.text_input("Ingrese la Provincia:", value=st.session_state.get("provincia", ""), key="provincia", on_change=update_provincia)
-municipio = st.sidebar.text_input("Ingrese el Municipio:", value=st.session_state.get("municipio", ""), key="municipio", on_change=update_municipio)
-distrito = st.sidebar.text_input("Ingrese el Distrito Municipal:", value=st.session_state.get("distrito", ""), key="distrito", on_change=update_distrito)
-seccion = st.sidebar.text_input("Ingrese la Sección:", value=st.session_state.get("seccion", ""), key="seccion")
-
-# Número de agentes y modo de visualización
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
 
+# -------------------------------
+# Botón para generar asignación
+# -------------------------------
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
-# Botón para generar asignación de calles
 if st.sidebar.button("Generar asignación"):
-    # Construir la dirección completa a partir de los niveles
-    address_components = [seccion, distrito, municipio, provincia, region]
-    # Solo se incluyen componentes no vacíos
-    address_full = ", ".join([comp for comp in address_components if comp])
-    st.write(f"**Consultando límites para:** {address_full}")
-    bbox = get_boundary(address_full)
-    if bbox:
-        st.write(f"Bounding Box: {bbox}")
-        with st.spinner("Consultando Overpass API para obtener calles..."):
-            streets = get_streets_by_bbox(bbox)
+    boundary = get_boundary(selected_region, selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
+    if not boundary:
+        st.error("No se pudo obtener el perímetro de la división seleccionada. Verifica los filtros.")
+    else:
+        st.write("Perímetro obtenido de la división seleccionada.")
+        with st.spinner("Consultando Overpass API para obtener calles dentro del perímetro..."):
+            streets = get_streets_by_polygon(boundary)
         if streets:
             assignments = assign_streets_cluster(streets, num_agents)
             agent_colors = generate_agent_colors(num_agents)
-            mapa = create_map(assignments, mode, bbox, agent_colors)
-            df = generate_dataframe(assignments)
+            mapa = create_map(assignments, mode, boundary, agent_colors)
+            df = generate_dataframe(assignments, selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
             order_list = []
             for agent, streets_assigned in assignments.items():
                 streets_ordered = reorder_cluster(streets_assigned.copy())
@@ -360,10 +512,10 @@ if st.sidebar.button("Generar asignación"):
             st.session_state.agent_colors = agent_colors
         else:
             st.session_state.resultado = None
-    else:
-        st.error("No se pudo obtener el límite del área seleccionada.")
 
+# -------------------------------
 # Mostrar resultados
+# -------------------------------
 if st.session_state.resultado:
     st.subheader("Filtro de Agente")
     assignments_dict = st.session_state.get("assignments", {})
@@ -376,7 +528,7 @@ if st.session_state.resultado:
     else:
         assignments_filtradas = assignments_dict
     
-    mapa_filtrado = create_map(assignments_filtradas, mode, bbox, st.session_state.get("agent_colors", {}))
+    mapa_filtrado = create_map(assignments_filtradas, mode, boundary, st.session_state.get("agent_colors", {}))
     
     st.subheader("Mapa de asignaciones")
     mapa_html = mapa_filtrado._repr_html_()
