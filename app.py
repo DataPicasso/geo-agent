@@ -307,19 +307,22 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
     y asigna cada grupo a una fecha laboral a partir de la fecha de inicio.
     """
     schedule = {}
-    # Para cada agente, calcular cuántos días son necesarios
     for agent in sorted(df["Agente"].unique()):
-        agent_df = df[df["Agente"] == agent].sort_values("Order") if "Order" in df.columns else df[df["Agente"] == agent]
+        agent_df = df[df["Agente"] == agent].copy()
+        # Ordenar según la columna "Order" si existe, o por el índice
+        if "Order" in agent_df.columns:
+            agent_df = agent_df.sort_values("Order")
+        else:
+            agent_df = agent_df.reset_index(drop=True)
         total_routes = len(agent_df)
         required_days = int(np.ceil(total_routes / rutas_por_dia))
-        # Generar fechas laborales a partir de start_date
         working_dates = []
         current_date = pd.to_datetime(start_date)
         while len(working_dates) < required_days:
             if current_date.strftime("%A") in working_days:
                 working_dates.append(current_date)
             current_date += pd.Timedelta(days=1)
-        groups = np.array_split(agent_df, required_days)
+        groups = [agent_df.iloc[i*rutas_por_dia:(i+1)*rutas_por_dia] for i in range(required_days)]
         schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} 
                            for date, group in zip(working_dates, groups)]
     return schedule
