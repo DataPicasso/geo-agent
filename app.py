@@ -10,13 +10,15 @@ from geopy.distance import geodesic
 import numpy as np
 
 # -------------------------------
-# Estilos personalizados sofisticados (tonos grises y azul)
+# Estilos personalizados sofisticados (tonos grises y azul) con mayor especificidad
 # -------------------------------
 st.markdown(
     """
     <style>
-    /* Fondo con degradado sutil y fuente refinada */
+    /* Fuente refinada */
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+    
+    /* Fondo con degradado sutil */
     body, .stApp {
         background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
         font-family: 'Roboto', sans-serif;
@@ -24,7 +26,7 @@ st.markdown(
     }
     
     /* Estilo para la barra lateral */
-    .css-1d391kg, .sidebar .sidebar-content {
+    [data-testid="stSidebar"] {
         background: #eef2f3;
         border: none;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -35,7 +37,22 @@ st.markdown(
         color: #003366;
     }
     
-    /* Botones refinados */
+    /* Botones refinados en la barra lateral */
+    [data-testid="stSidebar"] .stButton > button {
+        background-color: #00509e !important;
+        color: #fff !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-size: 16px !important;
+        font-weight: 500 !important;
+        padding: 10px 20px !important;
+        transition: background-color 0.3s ease;
+    }
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background-color: #003f7f !important;
+    }
+    
+    /* Botones refinados en el cuerpo principal */
     .stButton > button, .stDownloadButton > button {
         background-color: #00509e !important;
         color: #fff !important;
