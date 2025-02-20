@@ -1,10 +1,10 @@
 streamlit
-googlemaps
 requests
 pandas
 folium
+shapely
 scikit-learn
 geopy
 numpy
-shapely
+pyproj
 openpyxl
