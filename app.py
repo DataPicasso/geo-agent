@@ -10,7 +10,7 @@ from geopy.distance import geodesic
 import numpy as np
 
 # -------------------------------
-# Estilos personalizados sofisticados (tonos grises y azul) con mayor especificidad
+# Estilos personalizados (tonos fríos y azul) con mayor legibilidad
 # -------------------------------
 st.markdown(
     """
@@ -18,28 +18,28 @@ st.markdown(
     /* Fuente refinada */
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
     
-    /* Fondo con degradado sutil */
+    /* Fondo con degradado sutil (tonos fríos) */
     body, .stApp {
-        background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+        background: linear-gradient(135deg, #edf7fc, #dbeff9);
         font-family: 'Roboto', sans-serif;
-        color: #333;
+        color: #1a1a1a;
     }
     
-    /* Estilo para la barra lateral */
+    /* Barra lateral con tono ligeramente más oscuro */
     [data-testid="stSidebar"] {
-        background: #eef2f3;
+        background: #f2f9fd;
         border: none;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     
-    /* Encabezados y textos */
+    /* Títulos con tono azul oscuro */
     h1, h2, h3, h4, h5, h6 {
         color: #003366;
     }
     
-    /* Botones refinados en la barra lateral */
+    /* Botones en la barra lateral */
     [data-testid="stSidebar"] .stButton > button {
-        background-color: #00509e !important;
+        background-color: #007bff !important;  /* Azul estilo Bootstrap */
         color: #fff !important;
         border-radius: 8px !important;
         border: none !important;
@@ -49,12 +49,12 @@ st.markdown(
         transition: background-color 0.3s ease;
     }
     [data-testid="stSidebar"] .stButton > button:hover {
-        background-color: #003f7f !important;
+        background-color: #0056b3 !important; /* Hover más oscuro */
     }
     
-    /* Botones refinados en el cuerpo principal */
+    /* Botones en el cuerpo principal */
     .stButton > button, .stDownloadButton > button {
-        background-color: #00509e !important;
+        background-color: #007bff !important;
         color: #fff !important;
         border-radius: 8px !important;
         border: none !important;
@@ -64,23 +64,23 @@ st.markdown(
         transition: background-color 0.3s ease;
     }
     .stButton > button:hover, .stDownloadButton > button:hover {
-        background-color: #003f7f !important;
+        background-color: #0056b3 !important;
     }
     
     /* Estilos para tablas y contenedores */
     .css-1lcbmhc {
-        background-color: #fff;
+        background-color: #ffffff;
         border-radius: 8px;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
     }
     
-    /* Pie de página sofisticado */
+    /* Pie de página con tono claro */
     .footer {
         position: fixed;
         left: 0;
         bottom: 0;
         width: 100%;
-        background-color: #dde1e7;
+        background-color: #e3f2fd;
         text-align: center;
         padding: 10px 0;
         font-size: 14px;
@@ -293,16 +293,12 @@ def generate_dataframe(assignments, provincia, ciudad):
             })
     return pd.DataFrame(rows)
 
-# -------------------------------
-# Función para generar el calendario de visitas
-# -------------------------------
 def generate_schedule(df, num_weeks, working_days, start_date):
     """
     Genera un calendario de visitas para cada agente.
     Se asume una jornada laboral normal con los días seleccionados.
     Divide las calles asignadas (ordenadas) entre los días disponibles.
     """
-    # Mapeo de días en inglés a números (Monday=0, ..., Sunday=6)
     weekday_map = {"Monday":0, "Tuesday":1, "Wednesday":2, "Thursday":3, "Friday":4, "Saturday":5, "Sunday":6}
     working_day_numbers = [weekday_map[day] for day in working_days]
     
@@ -315,7 +311,6 @@ def generate_schedule(df, num_weeks, working_days, start_date):
         current_date += pd.Timedelta(days=1)
     
     schedule = {}
-    # Para cada agente, divide la ruta (ordenada) entre los días disponibles.
     for agent in sorted(df["Agente"].unique()):
         agent_df = df[df["Agente"] == agent].sort_values("Order") if "Order" in df.columns else df[df["Agente"] == agent]
         groups = np.array_split(agent_df, total_days)
@@ -323,9 +318,6 @@ def generate_schedule(df, num_weeks, working_days, start_date):
                            for date, group in zip(working_dates, groups)]
     return schedule
 
-# -------------------------------
-# Callbacks para mantener la selección en session_state
-# -------------------------------
 def update_provincia():
     st.session_state.ciudad = None
 
@@ -361,7 +353,6 @@ mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
-# Generación de asignación y rutas
 if st.sidebar.button("Generar asignación"):
     with st.spinner("Consultando Overpass API para obtener calles..."):
         streets = get_streets(provincia, ciudad)
@@ -370,14 +361,15 @@ if st.sidebar.button("Generar asignación"):
         agent_colors = generate_agent_colors(num_agents)
         mapa = create_map(assignments, mode, provincia, ciudad, agent_colors)
         df = generate_dataframe(assignments, provincia, ciudad)
-        # Se asigna el orden de visita basado en el reordenamiento (1-indexado)
+        
         order_list = []
-        for agent, streets in assignments.items():
-            streets_ordered = reorder_cluster(streets.copy())
+        for agent, streets_assigned in assignments.items():
+            streets_ordered = reorder_cluster(streets_assigned.copy())
             for i, street in enumerate(streets_ordered):
                 order_list.append(i+1)
         if len(order_list) == len(df):
             df["Order"] = order_list
+        
         st.session_state.resultado = {"mapa": mapa, "dataframe": df}
         st.session_state.assignments = assignments
         st.session_state.agent_colors = agent_colors
@@ -405,6 +397,7 @@ if st.session_state.resultado:
     if not st.session_state.resultado["dataframe"].empty:
         st.subheader("Datos asignados")
         st.dataframe(st.session_state.resultado["dataframe"])
+        
         output = BytesIO()
         st.session_state.resultado["dataframe"].to_excel(output, index=False, engine='openpyxl')
         output.seek(0)
@@ -415,16 +408,15 @@ if st.session_state.resultado:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
-        # -------------------------------
-        # Calendario de Visitas
-        # -------------------------------
         with st.expander("Calendario de Visitas"):
             st.write("Configura el calendario de visitas:")
             start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("today"))
             num_weeks = st.number_input("Cantidad de semanas", min_value=1, value=2, step=1)
-            working_days = st.multiselect("Días laborables", 
-                                          options=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-                                          default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
+            working_days = st.multiselect(
+                "Días laborables", 
+                options=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+                default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+            )
             if working_days:
                 schedule = generate_schedule(st.session_state.resultado["dataframe"], num_weeks, working_days, start_date)
                 agente_calendario = st.selectbox("Selecciona el agente para ver su calendario:", options=sorted(schedule.keys()))
@@ -438,9 +430,6 @@ if st.session_state.resultado:
 else:
     st.info("Realice la solicitud de asignación para ver resultados.")
 
-# -------------------------------
-# Pie de página sofisticado
-# -------------------------------
 footer = """
 <style>
 .footer {
@@ -448,7 +437,7 @@ footer = """
     left: 0;
     bottom: 0;
     width: 100%;
-    background-color: #dde1e7;
+    background-color: #e3f2fd;
     text-align: center;
     padding: 10px 0;
     font-size: 14px;
