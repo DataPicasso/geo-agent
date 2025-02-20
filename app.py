@@ -10,7 +10,7 @@ from geopy.distance import geodesic
 import numpy as np
 
 # -------------------------------
-# Estilos personalizados (tonos fríos y azul) con mayor legibilidad
+# Estilos personalizados sofisticados (tonos fríos y azul) con mayor especificidad y labels estilizados
 # -------------------------------
 st.markdown(
     """
@@ -25,21 +25,27 @@ st.markdown(
         color: #1a1a1a;
     }
     
-    /* Barra lateral con tono ligeramente más oscuro */
+    /* Estilo para la barra lateral */
     [data-testid="stSidebar"] {
         background: #f2f9fd;
         border: none;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     
-    /* Títulos con tono azul oscuro */
+    /* Estilizar los labels (textos arriba de los cuadros) en la barra lateral */
+    [data-testid="stSidebar"] label {
+        color: #003366 !important;
+        font-weight: 600 !important;
+    }
+    
+    /* Encabezados y textos */
     h1, h2, h3, h4, h5, h6 {
         color: #003366;
     }
     
-    /* Botones en la barra lateral */
+    /* Botones refinados en la barra lateral */
     [data-testid="stSidebar"] .stButton > button {
-        background-color: #007bff !important;  /* Azul estilo Bootstrap */
+        background-color: #007bff !important;
         color: #fff !important;
         border-radius: 8px !important;
         border: none !important;
@@ -49,10 +55,10 @@ st.markdown(
         transition: background-color 0.3s ease;
     }
     [data-testid="stSidebar"] .stButton > button:hover {
-        background-color: #0056b3 !important; /* Hover más oscuro */
+        background-color: #0056b3 !important;
     }
     
-    /* Botones en el cuerpo principal */
+    /* Botones refinados en el cuerpo principal */
     .stButton > button, .stDownloadButton > button {
         background-color: #007bff !important;
         color: #fff !important;
@@ -74,7 +80,7 @@ st.markdown(
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
     }
     
-    /* Pie de página con tono claro */
+    /* Pie de página sofisticado */
     .footer {
         position: fixed;
         left: 0;
@@ -361,7 +367,6 @@ if st.sidebar.button("Generar asignación"):
         agent_colors = generate_agent_colors(num_agents)
         mapa = create_map(assignments, mode, provincia, ciudad, agent_colors)
         df = generate_dataframe(assignments, provincia, ciudad)
-        
         order_list = []
         for agent, streets_assigned in assignments.items():
             streets_ordered = reorder_cluster(streets_assigned.copy())
@@ -369,7 +374,6 @@ if st.sidebar.button("Generar asignación"):
                 order_list.append(i+1)
         if len(order_list) == len(df):
             df["Order"] = order_list
-        
         st.session_state.resultado = {"mapa": mapa, "dataframe": df}
         st.session_state.assignments = assignments
         st.session_state.agent_colors = agent_colors
@@ -408,6 +412,9 @@ if st.session_state.resultado:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
+        # -------------------------------
+        # Calendario de Visitas
+        # -------------------------------
         with st.expander("Calendario de Visitas"):
             st.write("Configura el calendario de visitas:")
             start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("today"))
