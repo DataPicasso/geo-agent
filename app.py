@@ -5,7 +5,7 @@ import folium
 import random
 from streamlit_folium import st_folium
 from shapely.geometry import MultiPoint, Polygon
-from io import BytesIO  # Nueva importación para el manejo del Excel en memoria
+from io import BytesIO  # Para el manejo del Excel en memoria
 
 # -------------------------------
 # Funciones para obtener provincias y ciudades dinámicamente desde Overpass API
@@ -38,7 +38,7 @@ def get_provincias():
 @st.cache_data
 def get_ciudades(provincia):
     """
-    Consulta Overpass API para obtener las ciudades o poblados (tags: place=city o place=town) 
+    Consulta Overpass API para obtener las ciudades o poblados (tags: place=city o place=town)
     dentro de la provincia seleccionada.
     """
     query = f"""
@@ -88,7 +88,7 @@ def get_streets(provincia, ciudad):
         return None
     data = response.json()
     if "elements" not in data or len(data["elements"]) == 0:
-        st.error("No se encontraron calles en la región especificada.")
+        st.warning("No se encontraron calles en la región especificada.")
         return None
     return data["elements"]
 
@@ -113,7 +113,7 @@ def generate_agent_colors(num_agents):
     colors = {}
     for agent in range(1, num_agents+1):
         # Genera un color hexadecimal aleatorio
-        colors[agent] = "#"+''.join([random.choice('0123456789ABCDEF') for j in range(6)])
+        colors[agent] = "#"+''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
     return colors
 
 # Función para crear un mapa Folium con la visualización
@@ -126,23 +126,29 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
                 cent = calculate_centroid(street["geometry"])
                 all_centroids.append(cent)
     if not all_centroids:
-        st.error("No se pudieron calcular coordenadas para centrar el mapa.")
+        st.warning("No se pudieron calcular coordenadas para centrar el mapa.")
         return None
+
     avg_lat = sum([pt[0] for pt in all_centroids]) / len(all_centroids)
     avg_lon = sum([pt[1] for pt in all_centroids]) / len(all_centroids)
     
-    m = folium.Map(location=[avg_lat, avg_lon], zoom_start=13)
+    # Se agrega tiles="cartodbpositron" para evitar fondo oscuro en modo oscuro
+    m = folium.Map(location=[avg_lat, avg_lon], zoom_start=13, tiles="cartodbpositron")
     
+    # Crear capas para cada agente
     for agent, streets in assignments.items():
-        # Crear una capa para cada agente
         feature_group = folium.FeatureGroup(name=f"Agente {agent}")
         if mode == "Calles":
             # Dibujar cada calle como polilínea
             for street in streets:
                 if "geometry" in street:
                     coords = [(pt["lat"], pt["lon"]) for pt in street["geometry"]]
-                    folium.PolyLine(coords, color=agent_colors[agent], weight=4,
-                                    tooltip=street.get("tags", {}).get("name", "Sin nombre")).add_to(feature_group)
+                    folium.PolyLine(
+                        coords,
+                        color=agent_colors[agent],
+                        weight=4,
+                        tooltip=street.get("tags", {}).get("name", "Sin nombre")
+                    ).add_to(feature_group)
         elif mode == "Área":
             # Calcular el convex hull de todos los puntos de las calles asignadas
             points = []
@@ -155,13 +161,20 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
                     polygon = MultiPoint(points).convex_hull
                     # Asegurarse de que se trata de un polígono válido
                     if isinstance(polygon, Polygon):
-                        folium.GeoJson(data={
-                            "type": "Feature",
-                            "geometry": {
-                                "type": "Polygon",
-                                "coordinates": [list(polygon.exterior.coords)]
+                        folium.GeoJson(
+                            data={
+                                "type": "Feature",
+                                "geometry": {
+                                    "type": "Polygon",
+                                    "coordinates": [list(polygon.exterior.coords)]
+                                }
+                            },
+                            style_function=lambda x, col=agent_colors[agent]: {
+                                "fillColor": col,
+                                "color": col,
+                                "fillOpacity": 0.4
                             }
-                        }, style_function=lambda x, col=agent_colors[agent]: {"fillColor": col, "color": col, "fillOpacity": 0.4}).add_to(feature_group)
+                        ).add_to(feature_group)
                 except Exception as e:
                     st.error(f"Error al calcular el área para el Agente {agent}: {e}")
         feature_group.add_to(m)
@@ -206,7 +219,7 @@ else:
     # Obtiene la lista de ciudades para la provincia seleccionada
     ciudades = get_ciudades(provincia)
     if not ciudades:
-        st.error("No se pudo obtener la lista de ciudades para la provincia seleccionada.")
+        st.warning("No se pudo obtener la lista de ciudades para la provincia seleccionada.")
     else:
         ciudad = st.sidebar.selectbox("Seleccione la ciudad:", ciudades)
 
@@ -228,15 +241,22 @@ if st.sidebar.button("Generar asignación"):
             st.subheader("Mapa de asignaciones")
             st_folium(folium_map, width=700, height=500)
         
-        # Generar DataFrame para exportar a Excel
-        df = generate_dataframe(assignments, provincia)
-        st.subheader("Datos asignados")
-        st.dataframe(df)
-        
-        # Convertir DataFrame a Excel usando BytesIO para descarga
-        output = BytesIO()
-        df.to_excel(output, index=False, engine='openpyxl')
-        output.seek(0)
-        st.download_button(label="Descargar Excel", data=output,
-                           file_name="asignacion_calles.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            # Generar DataFrame para exportar a Excel
+            df = generate_dataframe(assignments, provincia)
+            st.subheader("Datos asignados")
+            st.dataframe(df)
+            
+            # Convertir DataFrame a Excel usando BytesIO para descarga
+            output = BytesIO()
+            df.to_excel(output, index=False, engine='openpyxl')
+            output.seek(0)
+            st.download_button(
+                label="Descargar Excel",
+                data=output,
+                file_name="asignacion_calles.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.warning("No se pudo crear el mapa. Verifique que existan datos geográficos.")
+    else:
+        st.warning("No se encontraron datos de calles para la provincia y ciudad seleccionadas.")
