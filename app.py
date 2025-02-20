@@ -227,14 +227,17 @@ def get_province_boundary(provincia):
 def build_overpass_query_polygon(geometry):
     # Si la geometría es un MultiPolygon, extraemos el primer polígono
     if geometry["type"] == "MultiPolygon":
+        st.write("Detectado MultiPolygon, usando el primer polígono.")
         geometry = {"type": "Polygon", "coordinates": geometry["coordinates"][0]}
     if geometry["type"] != "Polygon":
         st.error("La geometría no es un polígono válido para la consulta.")
+        st.write("Geometría recibida:", geometry)
         return ""
     coords = []
     for coord in geometry["coordinates"][0]:
         coords.append(f"{coord[1]} {coord[0]}")
     poly_string = " ".join(coords)
+    st.write("Consulta poly_string:", poly_string)
     query = f"""
     [out:json][timeout:25];
     (
@@ -242,18 +245,23 @@ def build_overpass_query_polygon(geometry):
     );
     out geom;
     """
+    st.write("Consulta Overpass:", query)
     return query
 
 def get_streets_by_polygon(boundary):
     url = "http://overpass-api.de/api/interpreter"
     query = build_overpass_query_polygon(boundary)
+    if not query:
+        return None
     response = requests.post(url, data={'data': query})
     if response.status_code != 200:
         st.error("Error al consultar Overpass API con perímetro.")
+        st.write("Respuesta:", response.text)
         return None
     data = response.json()
     if "elements" not in data or len(data["elements"]) == 0:
         st.warning("No se encontraron calles en el perímetro especificado.")
+        st.write("Respuesta Overpass:", data)
         return None
     return data["elements"]
 
@@ -485,7 +493,8 @@ if st.sidebar.button("Generar asignación"):
     if not boundary:
         st.error("No se pudo obtener el perímetro de la división seleccionada. Verifica los filtros.")
     else:
-        st.write("Perímetro obtenido de la división seleccionada.")
+        st.write("Perímetro obtenido de la división seleccionada:")
+        st.write(boundary)
         with st.spinner("Consultando Overpass API para obtener calles dentro del perímetro..."):
             streets = get_streets_by_polygon(boundary)
         if streets:
