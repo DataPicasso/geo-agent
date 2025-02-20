@@ -156,7 +156,7 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
     folium.LayerControl().add_to(m)
     return m
 
-def generate_dataframe(assignments, provincia):
+def generate_dataframe(assignments, provincia, ciudad):
     rows = []
     for agent, streets in assignments.items():
         for street in streets:
@@ -168,6 +168,7 @@ def generate_dataframe(assignments, provincia):
             rows.append({
                 "Calle": name,
                 "Provincia": provincia,
+                "Ciudad": ciudad,
                 "País": "República Dominicana",
                 "Latitud": lat,
                 "Longitud": lon,
@@ -214,6 +215,7 @@ mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
+# Al generar la asignación se guardan además 'assignments' y 'agent_colors' en session_state
 if st.sidebar.button("Generar asignación"):
     with st.spinner("Consultando Overpass API para obtener calles..."):
         streets = get_streets(provincia, ciudad)
@@ -221,15 +223,32 @@ if st.sidebar.button("Generar asignación"):
         assignments = assign_streets(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
         folium_map = create_map(assignments, mode, provincia, ciudad, agent_colors)
-        df = generate_dataframe(assignments, provincia)
+        df = generate_dataframe(assignments, provincia, ciudad)
         st.session_state.resultado = {"mapa": folium_map, "dataframe": df}
+        st.session_state.assignments = assignments
+        st.session_state.agent_colors = agent_colors
     else:
         st.session_state.resultado = None
 
+# Si ya se generó un resultado, se permite filtrar por agente
 if st.session_state.resultado:
+    st.subheader("Filtro de Agente")
+    # Opciones: "Todos" o agente 1 hasta num_agents
+    filtro_opciones = ["Todos"] + [str(i) for i in range(1, num_agents+1)]
+    agente_filtrar = st.sidebar.selectbox("Filtrar por agente:", options=filtro_opciones, key="agent_filter")
+    
+    # Si se selecciona un agente específico, filtrar el diccionario 'assignments'
+    if agente_filtrar != "Todos":
+        agente_seleccionado = int(agente_filtrar)
+        assignments_filtradas = { agente_seleccionado: st.session_state.assignments.get(agente_seleccionado, []) }
+    else:
+        assignments_filtradas = st.session_state.assignments
+
+    # Re-generar el mapa según el filtro
+    mapa_filtrado = create_map(assignments_filtradas, mode, provincia, ciudad, st.session_state.agent_colors)
+    
     st.subheader("Mapa de asignaciones")
-    # Se usa st.components.v1.html para mostrar el mapa generado por Folium
-    mapa_html = st.session_state.resultado["mapa"]._repr_html_()
+    mapa_html = mapa_filtrado._repr_html_()
     st.components.v1.html(mapa_html, width=700, height=500, scrolling=True)
     
     if not st.session_state.resultado["dataframe"].empty:
