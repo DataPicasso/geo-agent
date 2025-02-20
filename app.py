@@ -6,7 +6,64 @@ import random
 from streamlit_folium import st_folium
 from shapely.geometry import MultiPoint, Polygon
 
-# Función para construir la consulta Overpass API
+# -------------------------------
+# Funciones para obtener provincias y ciudades dinámicamente desde Overpass API
+# -------------------------------
+
+@st.cache_data
+def get_provincias():
+    """
+    Consulta Overpass API para obtener todas las provincias (admin_level=4) de República Dominicana.
+    """
+    query = """
+    [out:json];
+    area["name"="República Dominicana"]->.country;
+    rel(area.country)["admin_level"="4"]["boundary"="administrative"];
+    out tags;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar las provincias en Overpass API")
+        return []
+    data = response.json()
+    provincias = []
+    for element in data.get("elements", []):
+        name = element.get("tags", {}).get("name")
+        if name:
+            provincias.append(name)
+    return sorted(list(set(provincias)))
+
+@st.cache_data
+def get_ciudades(provincia):
+    """
+    Consulta Overpass API para obtener las ciudades o poblados (tags: place=city o place=town) 
+    dentro de la provincia seleccionada.
+    """
+    query = f"""
+    [out:json];
+    area["name"="{provincia}"]->.province;
+    node(area.province)["place"~"^(city|town)$"];
+    out;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    if response.status_code != 200:
+        st.error("Error al consultar las ciudades en Overpass API")
+        return []
+    data = response.json()
+    ciudades = []
+    for element in data.get("elements", []):
+        name = element.get("tags", {}).get("name")
+        if name:
+            ciudades.append(name)
+    return sorted(list(set(ciudades)))
+
+# -------------------------------
+# Funciones ya existentes para el generador de calles y asignación
+# -------------------------------
+
+# Función para construir la consulta Overpass API de calles
 def build_overpass_query(provincia, ciudad):
     # La consulta busca el área de la provincia y luego filtra la ciudad dentro de ella
     query = f"""
@@ -20,7 +77,7 @@ def build_overpass_query(provincia, ciudad):
     """
     return query
 
-# Función para consultar Overpass API
+# Función para consultar Overpass API para obtener calles
 def get_streets(provincia, ciudad):
     url = "http://overpass-api.de/api/interpreter"
     query = build_overpass_query(provincia, ciudad)
@@ -131,23 +188,35 @@ def generate_dataframe(assignments, provincia):
             })
     return pd.DataFrame(rows)
 
-# ===============================
+# -------------------------------
 # Interfaz en Streamlit
-# ===============================
+# -------------------------------
 st.title("Asignación de Calles a Agentes en República Dominicana")
 
-# Entradas del usuario
+# Entradas del usuario en la barra lateral: selección de provincia y ciudad
 st.sidebar.header("Configuración")
-provincia = st.sidebar.text_input("Ingrese la provincia:", "Santo Domingo")
-ciudad = st.sidebar.text_input("Ingrese la ciudad:", "Santo Domingo Este")
+
+# Obtiene la lista de provincias de forma dinámica
+provincias = get_provincias()
+if not provincias:
+    st.error("No se pudo obtener la lista de provincias.")
+else:
+    provincia = st.sidebar.selectbox("Seleccione la provincia:", provincias)
+    # Obtiene la lista de ciudades para la provincia seleccionada
+    ciudades = get_ciudades(provincia)
+    if not ciudades:
+        st.error("No se pudo obtener la lista de ciudades para la provincia seleccionada.")
+    else:
+        ciudad = st.sidebar.selectbox("Seleccione la ciudad:", ciudades)
+
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"])
 
 if st.sidebar.button("Generar asignación"):
-    with st.spinner("Consultando Overpass API..."):
+    with st.spinner("Consultando Overpass API para obtener calles..."):
         streets = get_streets(provincia, ciudad)
     if streets:
-        st.success("Datos obtenidos correctamente.")
+        st.success("Datos de calles obtenidos correctamente.")
         # Asignar calles a agentes de forma secuencial
         assignments = assign_streets(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
