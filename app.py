@@ -255,7 +255,7 @@ def get_streets_by_polygon(boundary):
     return data["elements"]
 
 # -------------------------------
-# Funciones originales para asignación, clustering y mapeo (sin modificaciones)
+# Funciones para asignación, clustering y mapeo (sin modificaciones)
 # -------------------------------
 def calculate_centroid(geometry):
     lats = [point["lat"] for point in geometry]
@@ -430,29 +430,51 @@ def load_division_excel():
 
 df_division = load_division_excel()
 
-# Crear listas únicas para cada nivel a partir del Excel (se eliminó Región)
-provincias = sorted(df_division["Provincia"].dropna().unique().tolist()) if "Provincia" in df_division.columns else []
-municipios = sorted(df_division["Municipio"].dropna().unique().tolist()) if "Municipio" in df_division.columns else []
-distritos = sorted(df_division["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_division.columns else []
-secciones = sorted(df_division["Sección"].dropna().unique().tolist()) if "Sección" in df_division.columns else []
-barrios = sorted(df_division["Barrio"].dropna().unique().tolist()) if "Barrio" in df_division.columns else []
+# Crear listas dinámicas para cada nivel (cascada) a partir del Excel
+# Provincia: se obtiene de todo el Excel
+provincias_all = sorted(df_division["Provincia"].dropna().unique().tolist()) if "Provincia" in df_division.columns else []
+selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias_all, index=0, key="provincia", on_change=update_provincia)
 
-# -------------------------------
-# Interfaz en Streamlit (FILTROS DINÁMICOS)
-# -------------------------------
-st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
-st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
+# Municipio: filtrar por Provincia
+if selected_prov != "Todos":
+    df_prov = df_division[df_division["Provincia"] == selected_prov]
+else:
+    df_prov = df_division
+municipios_all = sorted(df_prov["Municipio"].dropna().unique().tolist()) if "Municipio" in df_prov.columns else []
+selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios_all, index=0, key="municipio", on_change=update_municipio)
 
-st.sidebar.header("Configuración de Filtros Dinámicos")
+# Distrito Municipal: filtrar por Provincia y Municipio
+if selected_prov != "Todos" and selected_muni != "Todos":
+    df_muni = df_prov[df_prov["Municipio"] == selected_muni]
+else:
+    df_muni = df_prov
+distritos_all = sorted(df_muni["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_muni.columns else []
+selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos_all, index=0, key="distrito")
 
-selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias, index=0, key="provincia", on_change=update_provincia)
-selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios, index=0, key="municipio", on_change=update_municipio)
-selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos, index=0, key="distrito")
-selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones, index=0, key="seccion")
-selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios, index=0, key="barrio")
+# Sección: filtrar por Provincia, Municipio y Distrito
+if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos":
+    df_dist = df_muni[df_muni["Distrito Municipal"] == selected_dist]
+else:
+    df_dist = df_muni
+secciones_all = sorted(df_dist["Sección"].dropna().unique().tolist()) if "Sección" in df_dist.columns else []
+selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones_all, index=0, key="seccion")
+
+# Barrio: filtrar por Provincia, Municipio, Distrito y Sección
+if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" and selected_secc != "Todos":
+    df_secc = df_dist[df_dist["Sección"] == selected_secc]
+else:
+    df_secc = df_dist
+barrios_all = sorted(df_secc["Barrio"].dropna().unique().tolist()) if "Barrio" in df_secc.columns else []
+selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios_all, index=0, key="barrio")
 
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
+
+# -------------------------------
+# Interfaz en Streamlit (TÍTULO Y DESCRIPCIÓN)
+# -------------------------------
+st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
+st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
 
 # -------------------------------
 # Botón para generar asignación
