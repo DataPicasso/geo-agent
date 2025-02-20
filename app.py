@@ -112,12 +112,11 @@ def get_regiones():
     data = st.session_state.get("geojson_regiones", {})
     if not data or "features" not in data:
         return []
-    # Se asume que cada feature tiene un atributo con el nombre de la región.
-    # Ajustar según la estructura real del GeoJSON.
+    # Ajustar según la estructura real del GeoJSON
     regiones = []
     for feature in data["features"]:
         props = feature.get("properties", {})
-        nombre = props.get("NOMBRE_REGION", None)  # Ajusta la clave al nombre real
+        nombre = props.get("NOMBRE_REGION", None)
         if nombre:
             regiones.append(nombre)
     return sorted(list(set(regiones)))
@@ -127,13 +126,14 @@ def get_provincias_por_region(region):
     Retorna la lista de provincias que pertenecen a la región especificada,
     utilizando el GeoJSON de provincias.
     """
+    if not region:
+        return []
     data = st.session_state.get("geojson_provincias", {})
     if not data or "features" not in data:
         return []
     provincias = []
     for feature in data["features"]:
         props = feature.get("properties", {})
-        # Ajustar las claves al nombre real en el GeoJSON
         nombre_prov = props.get("NOMBRE_PROVINCIA", None)
         nombre_region = props.get("NOMBRE_REGION", None)
         if nombre_prov and nombre_region == region:
@@ -145,6 +145,8 @@ def get_municipios_por_provincia(provincia):
     Retorna la lista de municipios que pertenecen a la provincia especificada,
     usando el GeoJSON de municipios.
     """
+    if not provincia:
+        return []
     data = st.session_state.get("geojson_municipios", {})
     if not data or "features" not in data:
         return []
@@ -162,14 +164,16 @@ def get_distritos_por_municipio(municipio):
     Retorna la lista de distritos municipales que pertenecen al municipio,
     usando el GeoJSON de distritos.
     """
+    if not municipio:
+        return []
     data = st.session_state.get("geojson_distritos", {})
     if not data or "features" not in data:
         return []
     distritos = []
     for feature in data["features"]:
         props = feature.get("properties", {})
-        nombre_dm = props.get("NOMBRE_DM", None)  # Ajusta según el GeoJSON
-        nombre_muni = props.get("properties", {}).get("NOMBRE_MUNICIPIO", None)
+        nombre_dm = props.get("NOMBRE_DM", None)
+        nombre_muni = props.get("NOMBRE_MUNICIPIO", None)
         if nombre_dm and nombre_muni == municipio:
             distritos.append(nombre_dm)
     return sorted(list(set(distritos)))
@@ -179,22 +183,23 @@ def get_secciones_por_distrito(distrito):
     Retorna la lista de secciones que pertenecen al distrito municipal,
     usando el GeoJSON de secciones.
     """
+    if not distrito:
+        return []
     data = st.session_state.get("geojson_secciones", {})
     if not data or "features" not in data:
         return []
     secciones = []
     for feature in data["features"]:
         props = feature.get("properties", {})
-        nombre_seccion = props.get("NOMBRE_SECCION", None)  # Ajusta según el GeoJSON
+        nombre_seccion = props.get("NOMBRE_SECCION", None)
         nombre_dm = props.get("NOMBRE_DM", None)
-        # Dependiendo de la estructura, es posible que la propiedad sea otra
-        # Revisa la consistencia del GeoJSON para enlazar correctamente
-        if nombre_seccion and props.get("NOMBRE_DM", None) == distrito:
+        if nombre_seccion and nombre_dm == distrito:
             secciones.append(nombre_seccion)
     return sorted(list(set(secciones)))
 
 # -------------------------------
-# Funciones para obtener calles desde Overpass API (sin cambios)
+# Funciones para obtener calles desde Overpass API
+# (Mantienen la lógica original)
 # -------------------------------
 def build_overpass_query(provincia, municipio, distrito):
     # Se construye la consulta utilizando la jerarquía: provincia > municipio > distrito
@@ -224,7 +229,8 @@ def get_streets(provincia, municipio, distrito):
     return data["elements"]
 
 # -------------------------------
-# Funciones de asignación y mapeo (sin cambios)
+# Funciones de asignación y mapeo
+# (Sin cambios en la lógica principal)
 # -------------------------------
 def calculate_centroid(geometry):
     lats = [point["lat"] for point in geometry]
@@ -232,10 +238,6 @@ def calculate_centroid(geometry):
     return sum(lats) / len(lats), sum(lons) / len(lons)
 
 def assign_streets_cluster(streets, num_agents):
-    """
-    Convierte la lista de calles en un conjunto de coordenadas (usando el centroide de cada calle)
-    y aplica KMeans para agruparlas en num_agents clusters. Retorna un diccionario con cada cluster.
-    """
     data = []
     indices = []
     for idx, street in enumerate(streets):
@@ -254,9 +256,6 @@ def assign_streets_cluster(streets, num_agents):
     return assignments
 
 def reorder_cluster(cluster_streets):
-    """
-    Reordena la lista de calles dentro de un cluster usando el algoritmo del vecino más cercano.
-    """
     if len(cluster_streets) < 2:
         return cluster_streets
     ordered = [cluster_streets.pop(0)]
@@ -358,11 +357,6 @@ def generate_dataframe(assignments, provincia, municipio, distrito):
     return pd.DataFrame(rows)
 
 def generate_schedule(df, working_days, start_date, rutas_por_dia):
-    """
-    Genera un calendario de visitas para cada agente.
-    Divide la ruta asignada de cada agente en grupos de 'rutas_por_dia'
-    y asigna cada grupo a una fecha laboral a partir de la fecha de inicio.
-    """
     schedule = {}
     for agent in sorted(df["Agente"].unique()):
         agent_df = df[df["Agente"] == agent].copy()
@@ -384,7 +378,8 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
     return schedule
 
 # -------------------------------
-# Funciones de actualización de sesión (mínimo cambio)
+# Funciones de actualización de sesión
+# (Resetean niveles inferiores al cambiar uno superior)
 # -------------------------------
 def update_region():
     st.session_state.provincia = None
@@ -426,56 +421,80 @@ st.sidebar.header("Configuración de GEO AGENT")
 
 # 1. Selección de Región
 regiones = get_regiones()
+region = None  # Aseguramos que 'region' exista siempre
 if not regiones:
     st.error("No se pudo obtener la lista de regiones.")
 else:
     if "region" not in st.session_state:
         st.session_state.region = regiones[0]
-    region = st.sidebar.selectbox("Seleccione la región:", regiones,
-                                  index=regiones.index(st.session_state.region),
-                                  key="region", on_change=update_region)
+    region = st.sidebar.selectbox(
+        "Seleccione la región:",
+        regiones,
+        index=regiones.index(st.session_state.region),
+        key="region",
+        on_change=update_region
+    )
 
 # 2. Selección de Provincia
-provincias = get_provincias_por_region(region)
+provincias = get_provincias_por_region(region) if region else []
+provincia = None
 if provincias:
     if "provincia" not in st.session_state or st.session_state.provincia not in provincias:
         st.session_state.provincia = provincias[0]
-    provincia = st.sidebar.selectbox("Seleccione la provincia:", provincias,
-                                     index=provincias.index(st.session_state.provincia),
-                                     key="provincia", on_change=update_provincia)
+    provincia = st.sidebar.selectbox(
+        "Seleccione la provincia:",
+        provincias,
+        index=provincias.index(st.session_state.provincia),
+        key="provincia",
+        on_change=update_provincia
+    )
 else:
     st.warning("No se encontraron provincias para la región seleccionada.")
 
 # 3. Selección de Municipio
 municipios = get_municipios_por_provincia(provincia) if provincia else []
+municipio = None
 if municipios:
     if "municipio" not in st.session_state or st.session_state.municipio not in municipios:
         st.session_state.municipio = municipios[0]
-    municipio = st.sidebar.selectbox("Seleccione el municipio:", municipios,
-                                     index=municipios.index(st.session_state.municipio),
-                                     key="municipio", on_change=update_municipio)
+    municipio = st.sidebar.selectbox(
+        "Seleccione el municipio:",
+        municipios,
+        index=municipios.index(st.session_state.municipio),
+        key="municipio",
+        on_change=update_municipio
+    )
 else:
     st.warning("No se encontraron municipios para la provincia seleccionada.")
 
 # 4. Selección de Distrito Municipal
 distritos = get_distritos_por_municipio(municipio) if municipio else []
+distrito = None
 if distritos:
     if "distrito" not in st.session_state or st.session_state.distrito not in distritos:
         st.session_state.distrito = distritos[0]
-    distrito = st.sidebar.selectbox("Seleccione el Distrito Municipal:", distritos,
-                                    index=distritos.index(st.session_state.distrito),
-                                    key="distrito", on_change=update_distrito)
+    distrito = st.sidebar.selectbox(
+        "Seleccione el Distrito Municipal:",
+        distritos,
+        index=distritos.index(st.session_state.distrito),
+        key="distrito",
+        on_change=update_distrito
+    )
 else:
     st.warning("No se encontraron distritos municipales para el municipio seleccionado.")
 
 # 5. Selección de Sección
 secciones = get_secciones_por_distrito(distrito) if distrito else []
+seccion = None
 if secciones:
     if "seccion" not in st.session_state or st.session_state.seccion not in secciones:
         st.session_state.seccion = secciones[0]
-    seccion = st.sidebar.selectbox("Seleccione la Sección:", secciones,
-                                   index=secciones.index(st.session_state.seccion),
-                                   key="seccion")
+    seccion = st.sidebar.selectbox(
+        "Seleccione la Sección:",
+        secciones,
+        index=secciones.index(st.session_state.seccion),
+        key="seccion"
+    )
 else:
     st.warning("No se encontraron secciones para el distrito seleccionado.")
 
@@ -490,9 +509,7 @@ if "resultado" not in st.session_state:
 if st.sidebar.button("Generar asignación"):
     with st.spinner("Consultando Overpass API para obtener calles..."):
         # Se usa la provincia, municipio y distrito seleccionados.
-        # (La sección no se está usando directamente en Overpass, pero podría usarse
-        #  para delimitar un bounding box si se tuviera la geometría exacta.)
-        streets = get_streets(provincia, municipio, distrito)
+        streets = get_streets(provincia, municipio, distrito) if (provincia and municipio and distrito) else None
     if streets:
         assignments = assign_streets_cluster(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
@@ -524,7 +541,14 @@ if st.session_state.resultado:
     else:
         assignments_filtradas = assignments_dict
     
-    mapa_filtrado = create_map(assignments_filtradas, mode, provincia, municipio, distrito, st.session_state.get("agent_colors", {}))
+    mapa_filtrado = create_map(
+        assignments_filtradas, 
+        mode, 
+        provincia, 
+        municipio, 
+        distrito, 
+        st.session_state.get("agent_colors", {})
+    )
     
     st.subheader("Mapa de asignaciones")
     mapa_html = mapa_filtrado._repr_html_()
