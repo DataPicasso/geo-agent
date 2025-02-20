@@ -89,8 +89,8 @@ def calculate_centroid(geometry):
 
 def assign_streets_cluster(streets, num_agents):
     """
-    Agrupa las calles mediante KMeans (utilizando el centroide de cada calle)
-    en num_agents clusters. Retorna un diccionario con cada cluster asignado a un agente.
+    Convierte la lista de calles en un conjunto de coordenadas (usando el centroide de cada calle)
+    y aplica KMeans para agruparlas en num_agents clusters. Retorna un diccionario con cada cluster.
     """
     data = []
     indices = []
@@ -111,7 +111,7 @@ def assign_streets_cluster(streets, num_agents):
 
 def reorder_cluster(cluster_streets):
     """
-    Reordena la lista de calles dentro de un cluster usando un algoritmo de vecino más cercano.
+    Reordena la lista de calles dentro de un cluster usando el algoritmo del vecino más cercano.
     """
     if len(cluster_streets) < 2:
         return cluster_streets
@@ -139,7 +139,6 @@ def reorder_cluster(cluster_streets):
             break
     return ordered
 
-# Función para generar colores aleatorios para cada agente
 def generate_agent_colors(num_agents):
     colors = {}
     for agent in range(1, num_agents+1):
@@ -147,7 +146,7 @@ def generate_agent_colors(num_agents):
     return colors
 
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
-    # Para mostrar inicialmente la República Dominicana, usaremos ubicación fija y zoom_start=8.
+    # Inicia el mapa centrado en la República Dominicana (ubicación fija) con zoom_start=8.
     m = folium.Map(location=[19.0, -70.0], zoom_start=8, tiles="cartodbpositron")
     for agent, streets in assignments.items():
         streets_ordered = reorder_cluster(streets.copy())
@@ -214,6 +213,38 @@ def generate_dataframe(assignments, provincia, ciudad):
     return pd.DataFrame(rows)
 
 # -------------------------------
+# Función para generar el calendario de visitas
+# -------------------------------
+def generate_schedule(df, num_weeks, working_days, start_date):
+    """
+    Genera un calendario de visitas para cada agente. Para cada agente se reparte la ruta (ordenada)
+    entre los días laborales disponibles durante el número de semanas indicadas.
+    """
+    # Mapeo de días en inglés a números (Monday=0, ..., Sunday=6)
+    weekday_map = {"Monday":0, "Tuesday":1, "Wednesday":2, "Thursday":3, "Friday":4, "Saturday":5, "Sunday":6}
+    working_day_numbers = [weekday_map[day] for day in working_days]
+    
+    # Genera una lista de fechas laborales a partir del start_date
+    working_dates = []
+    current_date = pd.to_datetime(start_date)
+    # Calcula la cantidad total de días laborales necesarios
+    total_days = num_weeks * len(working_days)
+    while len(working_dates) < total_days:
+        if current_date.weekday() in working_day_numbers:
+            working_dates.append(current_date)
+        current_date += pd.Timedelta(days=1)
+    
+    schedule = {}
+    # Para cada agente, divide las visitas (calles) en los días disponibles de forma equitativa.
+    for agent in sorted(df["Agente"].unique()):
+        agent_df = df[df["Agente"] == agent].sort_values("Order") if "Order" in df.columns else df[df["Agente"] == agent]
+        n = len(agent_df)
+        groups = np.array_split(agent_df, total_days)
+        schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} 
+                           for date, group in zip(working_dates, groups)]
+    return schedule
+
+# -------------------------------
 # Callbacks para mantener la selección en session_state
 # -------------------------------
 def update_provincia():
@@ -261,6 +292,17 @@ if st.sidebar.button("Generar asignación"):
         agent_colors = generate_agent_colors(num_agents)
         mapa = create_map(assignments, mode, provincia, ciudad, agent_colors)
         df = generate_dataframe(assignments, provincia, ciudad)
+        # Agregamos la columna de orden de visita para el calendario si es posible
+        # Se asume que el reordenamiento dentro de cada cluster es la ruta óptima
+        # Para ello, podemos asignar la columna "Order" en función del orden en cada cluster.
+        order_list = []
+        for agent, streets in assignments.items():
+            streets_ordered = reorder_cluster(streets.copy())
+            for i, street in enumerate(streets_ordered):
+                order_list.append(i+1)
+        # Si la longitud coincide, agregamos la columna (esto es opcional)
+        if len(order_list) == len(df):
+            df["Order"] = order_list
         st.session_state.resultado = {"mapa": mapa, "dataframe": df}
         st.session_state.assignments = assignments
         st.session_state.agent_colors = agent_colors
@@ -297,6 +339,29 @@ if st.session_state.resultado:
             file_name="asignacion_calles.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+        
+        # -------------------------------
+        # Calendario de Visitas
+        # -------------------------------
+        with st.expander("Calendario de Visitas"):
+            st.write("Configura el calendario de visitas:")
+            start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("today"))
+            num_weeks = st.number_input("Cantidad de semanas", min_value=1, value=2, step=1)
+            working_days = st.multiselect("Días laborables", 
+                                          options=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+                                          default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
+            if working_days:
+                # Generamos el calendario usando el DataFrame generado
+                schedule = generate_schedule(st.session_state.resultado["dataframe"], num_weeks, working_days, start_date)
+                # Permite seleccionar el agente para ver su calendario
+                agente_calendario = st.selectbox("Selecciona el agente para ver su calendario:", 
+                                                 options=sorted(schedule.keys()))
+                st.write(f"### Calendario para el Agente {agente_calendario}")
+                # Mostramos el calendario en una tabla
+                schedule_df = pd.DataFrame(schedule[agente_calendario])
+                st.dataframe(schedule_df)
+            else:
+                st.warning("Selecciona al menos un día laboral.")
     else:
         st.warning("No se encontraron datos de calles para exportar.")
 else:
