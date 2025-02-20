@@ -12,9 +12,6 @@ from io import BytesIO  # Para el manejo del Excel en memoria
 # -------------------------------
 
 def get_provincias():
-    """
-    Consulta Overpass API para obtener todas las provincias (admin_level=4) de República Dominicana.
-    """
     query = """
     [out:json];
     area["name"="República Dominicana"]->.country;
@@ -35,10 +32,6 @@ def get_provincias():
     return sorted(list(set(provincias)))
 
 def get_ciudades(provincia):
-    """
-    Consulta Overpass API para obtener las ciudades, pueblos o poblados
-    (tags: place=city|town|village) dentro de la provincia seleccionada.
-    """
     query = f"""
     [out:json];
     area["name"="{provincia}"]->.province;
@@ -104,32 +97,24 @@ def assign_streets(streets, num_agents):
 def generate_agent_colors(num_agents):
     colors = {}
     for agent in range(1, num_agents+1):
-        # Genera un color hexadecimal aleatorio
-        colors[agent] = "#"+''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
+        colors[agent] = "#" + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
     return colors
 
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
-    """
-    Retorna siempre un objeto folium.Map, aunque no haya calles.
-    """
     all_centroids = []
     for streets in assignments.values():
         for street in streets:
             if "geometry" in street and len(street["geometry"]) > 0:
                 cent = calculate_centroid(street["geometry"])
                 all_centroids.append(cent)
-
     if not all_centroids:
         st.warning("No se encontraron coordenadas de calles. Mostrando mapa base de RD.")
-        default_lat, default_lon = 19.0, -70.0  # Centro aproximado de RD
+        default_lat, default_lon = 19.0, -70.0
         m = folium.Map(location=[default_lat, default_lon], zoom_start=8, tiles="cartodbpositron")
         return m
-
     avg_lat = sum(pt[0] for pt in all_centroids) / len(all_centroids)
     avg_lon = sum(pt[1] for pt in all_centroids) / len(all_centroids)
-
     m = folium.Map(location=[avg_lat, avg_lon], zoom_start=13, tiles="cartodbpositron")
-    
     for agent, streets in assignments.items():
         feature_group = folium.FeatureGroup(name=f"Agente {agent}")
         if mode == "Calles":
@@ -169,7 +154,6 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
                 except Exception as e:
                     st.error(f"Error al calcular el área para el Agente {agent}: {e}")
         feature_group.add_to(m)
-    
     folium.LayerControl().add_to(m)
     return m
 
@@ -195,8 +179,8 @@ def generate_dataframe(assignments, provincia):
 # -------------------------------
 # Interfaz en Streamlit
 # -------------------------------
-st.title("Asignación de Calles a Agentes en República Dominicana")
 
+st.title("Asignación de Calles a Agentes en República Dominicana")
 st.sidebar.header("Configuración")
 
 provincias = get_provincias()
@@ -213,35 +197,42 @@ else:
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"])
 
+# Usamos session_state para guardar resultados y evitar que se borren tras el run
+if "resultado" not in st.session_state:
+    st.session_state.resultado = None
+
 if st.sidebar.button("Generar asignación"):
-    st.write("**Provincia seleccionada:**", provincia)
-    st.write("**Ciudad seleccionada:**", ciudad)
     with st.spinner("Consultando Overpass API para obtener calles..."):
         streets = get_streets(provincia, ciudad)
     if streets:
-        st.success(f"Datos de calles obtenidos. Total: {len(streets)} calles/ways.")
         assignments = assign_streets(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
-        
         folium_map = create_map(assignments, mode, provincia, ciudad, agent_colors)
-        
-        st.subheader("Mapa de asignaciones")
-        st_folium(folium_map, width=700, height=500)
-
         df = generate_dataframe(assignments, provincia)
-        if not df.empty:
-            st.subheader("Datos asignados")
-            st.dataframe(df)
-            output = BytesIO()
-            df.to_excel(output, index=False, engine='openpyxl')
-            output.seek(0)
-            st.download_button(
-                label="Descargar Excel",
-                data=output,
-                file_name="asignacion_calles.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.warning("No se encontraron datos de calles para exportar.")
+        # Guardar en session_state para mantener los resultados visibles
+        st.session_state.resultado = {
+            "mapa": folium_map,
+            "dataframe": df
+        }
     else:
-        st.warning("No se encontraron datos de calles para la provincia y ciudad seleccionadas.")
+        st.session_state.resultado = None
+
+if st.session_state.resultado:
+    st.subheader("Mapa de asignaciones")
+    st_folium(st.session_state.resultado["mapa"], width=700, height=500)
+    if not st.session_state.resultado["dataframe"].empty:
+        st.subheader("Datos asignados")
+        st.dataframe(st.session_state.resultado["dataframe"])
+        output = BytesIO()
+        st.session_state.resultado["dataframe"].to_excel(output, index=False, engine='openpyxl')
+        output.seek(0)
+        st.download_button(
+            label="Descargar Excel",
+            data=output,
+            file_name="asignacion_calles.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.warning("No se encontraron datos de calles para exportar.")
+else:
+    st.info("Realice la solicitud de asignación para ver resultados.")
