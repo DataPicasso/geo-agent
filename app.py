@@ -177,27 +177,44 @@ def generate_dataframe(assignments, provincia):
     return pd.DataFrame(rows)
 
 # -------------------------------
+# Callbacks para mantener la selección en session_state
+# -------------------------------
+def update_provincia():
+    # Al cambiar de provincia, reiniciamos la ciudad en session_state
+    st.session_state.ciudad = None
+
+# -------------------------------
 # Interfaz en Streamlit
 # -------------------------------
 
 st.title("Asignación de Calles a Agentes en República Dominicana")
 st.sidebar.header("Configuración")
 
+# Obtener provincias y fijar clave para preservar la selección
 provincias = get_provincias()
 if not provincias:
-    st.error("No se pudo obtener la lista de provincias. Ver logs.")
+    st.error("No se pudo obtener la lista de provincias.")
 else:
-    provincia = st.sidebar.selectbox("Seleccione la provincia:", provincias)
+    if "provincia" not in st.session_state:
+        st.session_state.provincia = provincias[0]
+    provincia = st.sidebar.selectbox("Seleccione la provincia:", provincias,
+                                     index=provincias.index(st.session_state.provincia),
+                                     key="provincia", on_change=update_provincia)
+
+    # Obtener ciudades basadas en la provincia seleccionada
     ciudades = get_ciudades(provincia)
-    if not ciudades:
-        st.warning("No se encontraron ciudades para la provincia seleccionada.")
+    if ciudades:
+        if "ciudad" not in st.session_state or st.session_state.ciudad not in ciudades:
+            st.session_state.ciudad = ciudades[0]
+        ciudad = st.sidebar.selectbox("Seleccione la ciudad:", ciudades,
+                                      index=ciudades.index(st.session_state.ciudad),
+                                      key="ciudad")
     else:
-        ciudad = st.sidebar.selectbox("Seleccione la ciudad:", ciudades)
+        st.warning("No se encontraron ciudades para la provincia seleccionada.")
 
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"])
 
-# Usamos session_state para guardar resultados y evitar que se borren tras el run
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
@@ -209,11 +226,7 @@ if st.sidebar.button("Generar asignación"):
         agent_colors = generate_agent_colors(num_agents)
         folium_map = create_map(assignments, mode, provincia, ciudad, agent_colors)
         df = generate_dataframe(assignments, provincia)
-        # Guardar en session_state para mantener los resultados visibles
-        st.session_state.resultado = {
-            "mapa": folium_map,
-            "dataframe": df
-        }
+        st.session_state.resultado = {"mapa": folium_map, "dataframe": df}
     else:
         st.session_state.resultado = None
 
