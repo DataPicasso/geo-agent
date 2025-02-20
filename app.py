@@ -117,7 +117,7 @@ def get_distritos(municipio):
     return sorted(list(set(distritos)))
 
 # -------------------------------
-# Constantes para GeoJSON y Excel
+# Constantes para GeoJSON y archivo Excel de división territorial
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
@@ -333,32 +333,16 @@ def generate_dataframe(assignments, selected_prov, selected_muni, selected_dist,
                 "Distrito Municipal": selected_dist,
                 "Sección": selected_secc,
                 "Barrio": selected_barrio,
-                "País": "República Dominicana",
+                "País": "🇩🇴 República Dominicana",
                 "Latitud": lat,
                 "Longitud": lon,
                 "Agente": agent + 1
             })
     return pd.DataFrame(rows)
 
-def generate_schedule(df, working_days, start_date, rutas_por_dia):
-    schedule = {}
-    for agent in sorted(df["Agente"].unique()):
-        agent_df = df[df["Agente"] == agent].copy()
-        if "Order" in agent_df.columns:
-            agent_df = agent_df.sort_values("Order")
-        else:
-            agent_df = agent_df.reset_index(drop=True)
-        total_routes = len(agent_df)
-        required_days = int(np.ceil(total_routes / rutas_por_dia))
-        working_dates = []
-        current_date = pd.to_datetime(start_date)
-        while len(working_dates) < required_days:
-            if current_date.strftime("%A") in working_days:
-                working_dates.append(current_date)
-            current_date += pd.Timedelta(days=1)
-        groups = [agent_df.iloc[i*rutas_por_dia:(i+1)*rutas_por_dia] for i in range(required_days)]
-        schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} for date, group in zip(working_dates, groups)]
-    return schedule
+# -------------------------------
+# Eliminamos la función de generación de calendario
+# -------------------------------
 
 def update_provincia():
     st.session_state.municipio = None
@@ -402,7 +386,7 @@ selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barr
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
 
-st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
+st.title("GEO AGENT 🇩🇴: Organización Inteligente de Rutas en República Dominicana")
 st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
 
 if "resultado" not in st.session_state:
@@ -464,24 +448,6 @@ if st.session_state.resultado:
             file_name="asignacion_calles.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        
-        with st.expander("Calendario de Visitas"):
-            st.write("Configura el calendario de visitas:")
-            start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("today"))
-            rutas_por_dia = st.number_input("Cantidad de rutas por día", min_value=1, value=3, step=1)
-            working_days = st.multiselect(
-                "Días laborables", 
-                options=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-                default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-            )
-            if working_days:
-                schedule = generate_schedule(st.session_state.resultado["dataframe"], working_days, start_date, rutas_por_dia)
-                agente_calendario = st.selectbox("Selecciona el agente para ver su calendario:", options=sorted(schedule.keys()))
-                st.write(f"### Calendario para el Agente {agente_calendario}")
-                schedule_df = pd.DataFrame(schedule[agente_calendario])
-                st.dataframe(schedule_df)
-            else:
-                st.warning("Selecciona al menos un día laboral.")
     else:
         st.warning("No se encontraron datos de calles para exportar.")
 else:
