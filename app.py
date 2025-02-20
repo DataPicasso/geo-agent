@@ -10,7 +10,7 @@ from geopy.distance import geodesic
 import numpy as np
 
 # -------------------------------
-# Estilos personalizados (tema oscuro original)
+# Estilos personalizados (tema oscuro)
 # -------------------------------
 st.markdown(
     """
@@ -120,7 +120,7 @@ def get_provincias():
     return sorted(list(set(provincias)))
 
 def get_ciudades(provincia):
-    # Se asegura que la provincia esté dentro de la República Dominicana
+    # Se asegura que la provincia esté dentro de República Dominicana
     query = f"""
     [out:json];
     area["name"="República Dominicana"]->.country;
@@ -299,27 +299,27 @@ def generate_dataframe(assignments, provincia, ciudad):
             })
     return pd.DataFrame(rows)
 
-def generate_schedule(df, num_weeks, working_days, start_date):
+def generate_schedule(df, working_days, start_date, rutas_por_dia):
     """
     Genera un calendario de visitas para cada agente.
     Se asume una jornada laboral normal con los días seleccionados.
-    Divide las calles asignadas (ordenadas) entre los días disponibles.
+    Divide la ruta asignada de cada agente en grupos de 'rutas_por_dia'
+    y asigna cada grupo a una fecha laboral a partir de la fecha de inicio.
     """
-    weekday_map = {"Monday":0, "Tuesday":1, "Wednesday":2, "Thursday":3, "Friday":4, "Saturday":5, "Sunday":6}
-    working_day_numbers = [weekday_map[day] for day in working_days]
-    
-    working_dates = []
-    current_date = pd.to_datetime(start_date)
-    total_days = num_weeks * len(working_days)
-    while len(working_dates) < total_days:
-        if current_date.weekday() in working_day_numbers:
-            working_dates.append(current_date)
-        current_date += pd.Timedelta(days=1)
-    
     schedule = {}
+    # Para cada agente, calcular cuántos días son necesarios
     for agent in sorted(df["Agente"].unique()):
         agent_df = df[df["Agente"] == agent].sort_values("Order") if "Order" in df.columns else df[df["Agente"] == agent]
-        groups = np.array_split(agent_df, total_days)
+        total_routes = len(agent_df)
+        required_days = int(np.ceil(total_routes / rutas_por_dia))
+        # Generar fechas laborales a partir de start_date
+        working_dates = []
+        current_date = pd.to_datetime(start_date)
+        while len(working_dates) < required_days:
+            if current_date.strftime("%A") in working_days:
+                working_dates.append(current_date)
+            current_date += pd.Timedelta(days=1)
+        groups = np.array_split(agent_df, required_days)
         schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} 
                            for date, group in zip(working_dates, groups)]
     return schedule
@@ -330,9 +330,8 @@ def update_provincia():
 # -------------------------------
 # Interfaz en Streamlit
 # -------------------------------
-# Actualizamos los textos de título y subtítulos para reflejar el concepto de GEO AGENT
 st.title("GEO AGENT: Organización Inteligente de Rutas en República Dominicana")
-st.markdown("Esta aplicación utiliza **inteligencia artificial** para organizar y repartir las rutas de calles en República Dominicana, optimizando la distribución entre los agentes geográficos.")
+st.markdown("Esta aplicación utiliza **inteligencia artificial** para organizar y repartir las rutas de calles en República Dominicana, optimizando la distribución entre agentes geográficos.")
 
 st.sidebar.header("Configuración de GEO AGENT")
 
@@ -418,14 +417,14 @@ if st.session_state.resultado:
         with st.expander("Calendario de Visitas"):
             st.write("Configura el calendario de visitas:")
             start_date = st.date_input("Fecha de inicio", value=pd.to_datetime("today"))
-            num_weeks = st.number_input("Cantidad de semanas", min_value=1, value=2, step=1)
+            rutas_por_dia = st.number_input("Cantidad de rutas por día", min_value=1, value=3, step=1)
             working_days = st.multiselect(
                 "Días laborables", 
                 options=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
                 default=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
             )
             if working_days:
-                schedule = generate_schedule(st.session_state.resultado["dataframe"], num_weeks, working_days, start_date)
+                schedule = generate_schedule(st.session_state.resultado["dataframe"], working_days, start_date, rutas_por_dia)
                 agente_calendario = st.selectbox("Selecciona el agente para ver su calendario:", options=sorted(schedule.keys()))
                 st.write(f"### Calendario para el Agente {agente_calendario}")
                 schedule_df = pd.DataFrame(schedule[agente_calendario])
