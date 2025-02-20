@@ -11,7 +11,6 @@ from io import BytesIO  # Para el manejo del Excel en memoria
 # Funciones para obtener provincias y ciudades dinámicamente desde Overpass API
 # -------------------------------
 
-@st.cache_data
 def get_provincias():
     """
     Consulta Overpass API para obtener todas las provincias (admin_level=4) de República Dominicana.
@@ -35,7 +34,6 @@ def get_provincias():
             provincias.append(name)
     return sorted(list(set(provincias)))
 
-@st.cache_data
 def get_ciudades(provincia):
     """
     Consulta Overpass API para obtener las ciudades, pueblos o poblados
@@ -64,7 +62,6 @@ def get_ciudades(provincia):
 # Funciones para generar calles y asignación
 # -------------------------------
 
-# Función para construir la consulta Overpass API de calles
 def build_overpass_query(provincia, ciudad):
     query = f"""
     [out:json][timeout:25];
@@ -77,7 +74,6 @@ def build_overpass_query(provincia, ciudad):
     """
     return query
 
-# Función para consultar Overpass API para obtener calles
 def get_streets(provincia, ciudad):
     url = "http://overpass-api.de/api/interpreter"
     query = build_overpass_query(provincia, ciudad)
@@ -91,13 +87,11 @@ def get_streets(provincia, ciudad):
         return None
     return data["elements"]
 
-# Función para calcular el centroide de una calle (lista de nodos)
 def calculate_centroid(geometry):
     lats = [point["lat"] for point in geometry]
     lons = [point["lon"] for point in geometry]
     return sum(lats) / len(lats), sum(lons) / len(lons)
 
-# Función para asignar calles a agentes de forma secuencial (round-robin)
 def assign_streets(streets, num_agents):
     assignments = {}
     for agent in range(1, num_agents+1):
@@ -107,7 +101,6 @@ def assign_streets(streets, num_agents):
         assignments[agent].append(street)
     return assignments
 
-# Función para generar colores aleatorios
 def generate_agent_colors(num_agents):
     colors = {}
     for agent in range(1, num_agents+1):
@@ -115,11 +108,9 @@ def generate_agent_colors(num_agents):
         colors[agent] = "#"+''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
     return colors
 
-# Función para crear un mapa Folium con la visualización
 def create_map(assignments, mode, provincia, ciudad, agent_colors):
     """
     Retorna siempre un objeto folium.Map, aunque no haya calles.
-    Si no se encuentra ninguna coordenada, se centra en una ubicación por defecto.
     """
     all_centroids = []
     for streets in assignments.values():
@@ -128,25 +119,20 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
                 cent = calculate_centroid(street["geometry"])
                 all_centroids.append(cent)
 
-    # Si no hay coordenadas, usar un centro por defecto (aprox. RD)
     if not all_centroids:
-        st.warning("No se encontraron coordenadas de calles. Mostrando mapa base.")
+        st.warning("No se encontraron coordenadas de calles. Mostrando mapa base de RD.")
         default_lat, default_lon = 19.0, -70.0  # Centro aproximado de RD
         m = folium.Map(location=[default_lat, default_lon], zoom_start=8, tiles="cartodbpositron")
         return m
 
-    # Calcular punto promedio de todas las coordenadas
     avg_lat = sum(pt[0] for pt in all_centroids) / len(all_centroids)
     avg_lon = sum(pt[1] for pt in all_centroids) / len(all_centroids)
 
-    # Crear mapa centrado
     m = folium.Map(location=[avg_lat, avg_lon], zoom_start=13, tiles="cartodbpositron")
     
-    # Crear capas para cada agente
     for agent, streets in assignments.items():
         feature_group = folium.FeatureGroup(name=f"Agente {agent}")
         if mode == "Calles":
-            # Dibujar cada calle como polilínea
             for street in streets:
                 if "geometry" in street:
                     coords = [(pt["lat"], pt["lon"]) for pt in street["geometry"]]
@@ -157,7 +143,6 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
                         tooltip=street.get("tags", {}).get("name", "Sin nombre")
                     ).add_to(feature_group)
         elif mode == "Área":
-            # Calcular el convex hull de todos los puntos de las calles asignadas
             points = []
             for street in streets:
                 if "geometry" in street:
@@ -188,7 +173,6 @@ def create_map(assignments, mode, provincia, ciudad, agent_colors):
     folium.LayerControl().add_to(m)
     return m
 
-# Función para generar DataFrame con la información de las calles
 def generate_dataframe(assignments, provincia):
     rows = []
     for agent, streets in assignments.items():
@@ -213,19 +197,16 @@ def generate_dataframe(assignments, provincia):
 # -------------------------------
 st.title("Asignación de Calles a Agentes en República Dominicana")
 
-# Entradas del usuario en la barra lateral: selección de provincia y ciudad
 st.sidebar.header("Configuración")
 
-# Obtiene la lista de provincias de forma dinámica
 provincias = get_provincias()
 if not provincias:
-    st.error("No se pudo obtener la lista de provincias.")
+    st.error("No se pudo obtener la lista de provincias. Ver logs.")
 else:
     provincia = st.sidebar.selectbox("Seleccione la provincia:", provincias)
-    # Obtiene la lista de ciudades para la provincia seleccionada
     ciudades = get_ciudades(provincia)
     if not ciudades:
-        st.warning("No se pudo obtener la lista de ciudades para la provincia seleccionada.")
+        st.warning("No se encontraron ciudades para la provincia seleccionada.")
     else:
         ciudad = st.sidebar.selectbox("Seleccione la ciudad:", ciudades)
 
@@ -233,28 +214,24 @@ num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3
 mode = st.sidebar.radio("Visualización en el mapa:", options=["Calles", "Área"])
 
 if st.sidebar.button("Generar asignación"):
+    st.write("**Provincia seleccionada:**", provincia)
+    st.write("**Ciudad seleccionada:**", ciudad)
     with st.spinner("Consultando Overpass API para obtener calles..."):
         streets = get_streets(provincia, ciudad)
     if streets:
-        st.success("Datos de calles obtenidos correctamente.")
-        # Asignar calles a agentes de forma secuencial
+        st.success(f"Datos de calles obtenidos. Total: {len(streets)} calles/ways.")
         assignments = assign_streets(streets, num_agents)
         agent_colors = generate_agent_colors(num_agents)
         
-        # Crear el mapa interactivo (nunca será None)
         folium_map = create_map(assignments, mode, provincia, ciudad, agent_colors)
         
-        # Mostrar el mapa
         st.subheader("Mapa de asignaciones")
-        map_render = st_folium(folium_map, width=700, height=500)
+        st_folium(folium_map, width=700, height=500)
 
-        # Generar DataFrame para exportar a Excel
         df = generate_dataframe(assignments, provincia)
         if not df.empty:
             st.subheader("Datos asignados")
             st.dataframe(df)
-
-            # Convertir DataFrame a Excel usando BytesIO para descarga
             output = BytesIO()
             df.to_excel(output, index=False, engine='openpyxl')
             output.seek(0)
