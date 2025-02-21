@@ -11,16 +11,6 @@ import numpy as np
 from pyproj import Transformer
 import unicodedata
 
-# Inicialización de variables en session_state si no existen
-if "municipio" not in st.session_state:
-    st.session_state.municipio = None
-if "distrito" not in st.session_state:
-    st.session_state.distrito = None
-if "resultado" not in st.session_state:
-    st.session_state.resultado = None
-if "agent_colors" not in st.session_state:
-    st.session_state.agent_colors = None
-
 # -------------------------------
 # Función de normalización de cadenas
 # -------------------------------
@@ -395,12 +385,14 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
         schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} for date, group in zip(working_dates, groups)]
     return schedule
 
+# -------------------------------
+# Funciones de actualización (ahora sin on_change que reinicien todo)
+# -------------------------------
 def update_provincia():
-    st.session_state.municipio = None
-    st.session_state.distrito = None
+    pass  # Se elimina la lógica que reiniciaba los valores
 
 def update_municipio():
-    st.session_state.distrito = None
+    pass
 
 # -------------------------------
 # Cargar el archivo Excel con la división territorial
@@ -419,11 +411,14 @@ df_division = load_division_excel()
 # (La lista de Provincia se obtiene de OSM)
 # -------------------------------
 provincias_osm = get_provincias()
-selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias_osm, index=0, key="provincia", on_change=update_provincia)
+selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias_osm, index=0, key="provincia")
 
-df_prov = df_division[df_division["Provincia"].apply(normalize_string) == normalize_string(selected_prov)] if selected_prov != "Todos" else df_division
+if selected_prov != "Todos":
+    df_prov = df_division[df_division["Provincia"].apply(normalize_string) == normalize_string(selected_prov)]
+else:
+    df_prov = df_division
 municipios_all = sorted(df_prov["Municipio"].dropna().unique().tolist()) if "Municipio" in df_prov.columns else []
-selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios_all, index=0, key="municipio", on_change=update_municipio)
+selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios_all, index=0, key="municipio")
 
 df_muni = df_prov[df_prov["Municipio"] == selected_muni] if selected_prov != "Todos" and selected_muni != "Todos" else df_prov
 distritos_all = sorted(df_muni["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_muni.columns else []
