@@ -121,7 +121,9 @@ def get_distritos(municipio):
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
-PROVINCE_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_PROV&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
+# Se mantiene el uso de los GeoJSON para los otros niveles, pero ahora
+# la información de las provincias se obtendrá desde el GeoJSON de provincias en GitHub.
+PROVINCE_GEOJSON_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
 MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_MUNICIPIOS&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_DM&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 SECCION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_SECCIONES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
@@ -171,27 +173,20 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
         if feature:
             boundary = feature.get("geometry")
     if not boundary and selected_prov and selected_prov != "Todos":
-        boundary = get_province_boundary(selected_prov)
+        # Para provincias, se obtiene la información del GeoJSON alojado en GitHub.
+        data = load_geojson(PROVINCE_GEOJSON_URL)
+        # Suponiendo que en este GeoJSON la propiedad para el nombre de la provincia es "name"
+        feature = None
+        for feat in data.get("features", []):
+            if feat.get("properties", {}).get("name", "").strip().upper() == selected_prov.strip().upper():
+                feature = feat
+                break
+        if feature:
+            boundary = feature.get("geometry")
     return boundary
 
 def get_province_boundary(provincia):
-    query = f"""
-    [out:json][timeout:25];
-    area["name"="🇩🇴 República Dominicana"]->.country;
-    area["name"="{provincia}"](area.country)->.provincia;
-    (
-      relation(area.provincia)["boundary"="administrative"]["admin_level"="4"];
-    );
-    out geom;
-    """
-    url = "http://overpass-api.de/api/interpreter"
-    response = requests.post(url, data={'data': query})
-    data = response.json()
-    if data.get("elements"):
-        element = data["elements"][0]
-        if "geometry" in element:
-            coords = [(pt["lon"], pt["lat"]) for pt in element["geometry"]]
-            return {"type": "Polygon", "coordinates": [coords]}
+    # Esta función ya no se utiliza para provincias, dado que ahora se toma desde el GeoJSON de GitHub.
     return None
 
 def build_overpass_query_polygon(geometry):
@@ -218,16 +213,18 @@ def get_streets_by_polygon(boundary):
     url = "http://overpass-api.de/api/interpreter"
     query = build_overpass_query_polygon(boundary)
     if not query:
+        st.error("La geometría no es un polígono válido para la consulta.")
         return None
     try:
         response = requests.post(url, data={'data': query})
         data = response.json()
     except Exception as e:
-        st.error(f"Error al decodificar la respuesta JSON: {e}\nRespuesta recibida: {response.text}")
+        st.error(f"Error al decodificar la respuesta JSON: {e}\nRespuesta recibida: {response.text if response is not None else 'No response'}")
         return None
-    if data.get("elements"):
-        return data["elements"]
-    return None
+    if not data.get("elements"):
+        st.error(f"No se encontraron calles. Query ejecutada:\n{query}\nRespuesta recibida:\n{response.text}")
+        return None
+    return data["elements"]
 
 # -------------------------------
 # Funciones para asignación, clustering y mapeo
