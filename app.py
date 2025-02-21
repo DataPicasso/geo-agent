@@ -9,6 +9,13 @@ from sklearn.cluster import KMeans
 from geopy.distance import geodesic
 import numpy as np
 from pyproj import Transformer
+import unicodedata
+
+# -------------------------------
+# Función de normalización de cadenas
+# -------------------------------
+def normalize_string(s):
+    return unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('ASCII').upper()
 
 # -------------------------------
 # Estilos personalizados (tema oscuro)
@@ -129,7 +136,7 @@ def get_distritos(municipio):
     return sorted(list(set(distritos)))
 
 # -------------------------------
-# Constantes para GeoJSON y Excel
+# Constantes para GeoJSON y archivo Excel de división territorial
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
@@ -149,9 +156,10 @@ def load_geojson(url):
     return {}
 
 def filter_feature(geojson_data, value):
+    norm_value = normalize_string(value)
     for feature in geojson_data.get("features", []):
         props = feature.get("properties", {})
-        if "TOPONIMIA" in props and props["TOPONIMIA"].strip().upper() == value.strip().upper():
+        if "TOPONIMIA" in props and normalize_string(props["TOPONIMIA"]) == norm_value:
             return feature
     return None
 
@@ -393,36 +401,24 @@ df_division = load_division_excel()
 
 # -------------------------------
 # Listas dinámicas para cada nivel basadas en el Excel
-# (Provincia se obtiene de OSM)
+# (La lista de Provincia se obtiene de OSM)
 # -------------------------------
 provincias_osm = get_provincias()
 selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias_osm, index=0, key="provincia", on_change=update_provincia)
 
-if selected_prov != "Todos":
-    df_prov = df_division[df_division["Provincia"] == selected_prov]
-else:
-    df_prov = df_division
+df_prov = df_division[df_division["Provincia"] == selected_prov] if selected_prov != "Todos" else df_division
 municipios_all = sorted(df_prov["Municipio"].dropna().unique().tolist()) if "Municipio" in df_prov.columns else []
 selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios_all, index=0, key="municipio", on_change=update_municipio)
 
-if selected_prov != "Todos" and selected_muni != "Todos":
-    df_muni = df_prov[df_prov["Municipio"] == selected_muni]
-else:
-    df_muni = df_prov
+df_muni = df_prov[df_prov["Municipio"] == selected_muni] if selected_prov != "Todos" and selected_muni != "Todos" else df_prov
 distritos_all = sorted(df_muni["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_muni.columns else []
 selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos_all, index=0, key="distrito")
 
-if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos":
-    df_dist = df_muni[df_muni["Distrito Municipal"] == selected_dist]
-else:
-    df_dist = df_muni
+df_dist = df_muni[df_muni["Distrito Municipal"] == selected_dist] if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" else df_muni
 secciones_all = sorted(df_dist["Sección"].dropna().unique().tolist()) if "Sección" in df_dist.columns else []
 selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones_all, index=0, key="seccion")
 
-if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" and selected_secc != "Todos":
-    df_secc = df_dist[df_dist["Sección"] == selected_secc]
-else:
-    df_secc = df_dist
+df_secc = df_dist[df_dist["Sección"] == selected_secc] if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" and selected_secc != "Todos" else df_dist
 barrios_all = sorted(df_secc["Barrio"].dropna().unique().tolist()) if "Barrio" in df_secc.columns else []
 selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios_all, index=0, key="barrio")
 
