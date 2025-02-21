@@ -121,7 +121,7 @@ def get_distritos(municipio):
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
-# Estos siguen siendo para municipios, distritos, secciones y barrios
+# Para municipios, distritos, secciones y barrios se siguen usando estos URLs:
 PROVINCE_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_PROV&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_MUNICIPIOS&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_DM&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
@@ -173,8 +173,7 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
         boundary = get_province_boundary(selected_prov)
     return boundary
 
-# Modificación: Para provincias se obtiene el perímetro desde el GeoJSON en GitHub,
-# usando la propiedad "name" en lugar de "TOPONIMIA".
+# Para provincias, usamos el GeoJSON de GitHub y comparamos con la propiedad "name"
 def get_province_boundary(provincia):
     PROVINCIAS_GEOJSON_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
     data = load_geojson(PROVINCIAS_GEOJSON_URL)
@@ -187,15 +186,24 @@ def get_province_boundary(provincia):
     return None
 
 def build_overpass_query_polygon(geometry):
+    # Si la geometría es MultiPolygon, usamos el primer polígono
     if geometry["type"] == "MultiPolygon":
         geometry = {"type": "Polygon", "coordinates": geometry["coordinates"][0]}
     if geometry["type"] != "Polygon":
         return ""
-    transformer = Transformer.from_crs("EPSG:32619", "EPSG:4326", always_xy=True)
-    coords = []
-    for coord in geometry["coordinates"][0]:
-        lon, lat = transformer.transform(coord[0], coord[1])
-        coords.append(f"{lat} {lon}")
+    
+    # Verificar si las coordenadas ya están en lat/lon (EPSG:4326)
+    # Si el primer punto tiene latitud entre -90 y 90, asumimos EPSG:4326
+    first_coord = geometry["coordinates"][0][0]
+    if -90 <= first_coord[1] <= 90 and -180 <= first_coord[0] <= 180:
+        coords = [f"{pt[1]} {pt[0]}" for pt in geometry["coordinates"][0]]
+    else:
+        # En otro caso, asumimos que están en EPSG:32619 y se transforman a 4326
+        transformer = Transformer.from_crs("EPSG:32619", "EPSG:4326", always_xy=True)
+        coords = []
+        for coord in geometry["coordinates"][0]:
+            lon, lat = transformer.transform(coord[0], coord[1])
+            coords.append(f"{lat} {lon}")
     poly_string = " ".join(coords)
     query = f"""
     [out:json][timeout:25];
@@ -242,7 +250,7 @@ def assign_streets_cluster(streets, num_agents):
     data = np.array(data)
     kmeans = KMeans(n_clusters=num_agents, n_init=10, random_state=42).fit(data)
     labels = kmeans.labels_
-    assignments = { i: [] for i in range(num_agents) }
+    assignments = {i: [] for i in range(num_agents)}
     for label, idx in zip(labels, indices):
         assignments[label].append(streets[idx])
     return assignments
