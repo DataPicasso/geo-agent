@@ -121,11 +121,14 @@ def get_distritos(municipio):
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
-PROVINCE_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_PROV&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
+# Se mantienen las URLs para municipios, distritos, secciones y barrios
 MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_MUNICIPIOS&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_DM&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 SECCION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_SECCIONES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 BARRIOS_PARAJES_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_BPARAJES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
+
+# Nuevo: URL para el GeoJSON de provincias (usamos la URL raw de GitHub)
+PROVINCE_GEOJSON_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
 
 # -------------------------------
 # Funciones para cargar y filtrar GeoJSON
@@ -139,9 +142,7 @@ def load_geojson(url):
 def filter_feature(geojson_data, value):
     for feature in geojson_data.get("features", []):
         props = feature.get("properties", {})
-        if "TOPONIMIA" in props and props["TOPONIMIA"].strip().upper() == value.strip().upper():
-            return feature
-        # Si la propiedad 'name' está presente, también se puede comparar con ella
+        # Se asume que en el GeoJSON de provincias la propiedad a comparar es "name"
         if "name" in props and props["name"].strip().upper() == value.strip().upper():
             return feature
     return None
@@ -172,15 +173,17 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
         boundary = get_province_boundary(selected_prov)
     return boundary
 
-# Aquí se reemplaza la consulta a Overpass por la carga del GeoJSON de provincias desde GitHub
 def get_province_boundary(provincia):
-    url = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
-    data = load_geojson(url)
-    # Se compara la propiedad "name" (o "TOPONIMIA" si fuera el caso) con el valor de la provincia
-    for feature in data.get("features", []):
-        props = feature.get("properties", {})
-        if "name" in props and props["name"].strip().upper() == provincia.strip().upper():
-            return feature.get("geometry")
+    # Se carga el GeoJSON de provincias desde el repositorio y se busca la feature correspondiente
+    data = load_geojson(PROVINCE_GEOJSON_URL)
+    feature = filter_feature(data, provincia)
+    if feature:
+        geometry = feature.get("geometry")
+        # Si la geometría es MultiPolygon, se toma el primer polígono
+        if geometry["type"] == "MultiPolygon":
+            geometry = {"type": "Polygon", "coordinates": geometry["coordinates"][0]}
+        if geometry["type"] == "Polygon":
+            return geometry
     return None
 
 def build_overpass_query_polygon(geometry):
@@ -334,26 +337,6 @@ def generate_dataframe(assignments, selected_prov, selected_muni, selected_dist,
             })
     return pd.DataFrame(rows)
 
-def generate_schedule(df, working_days, start_date, rutas_por_dia):
-    schedule = {}
-    for agent in sorted(df["Agente"].unique()):
-        agent_df = df[df["Agente"] == agent].copy()
-        if "Order" in agent_df.columns:
-            agent_df = agent_df.sort_values("Order")
-        else:
-            agent_df = agent_df.reset_index(drop=True)
-        total_routes = len(agent_df)
-        required_days = int(np.ceil(total_routes / rutas_por_dia))
-        working_dates = []
-        current_date = pd.to_datetime(start_date)
-        while len(working_dates) < required_days:
-            if current_date.strftime("%A") in working_days:
-                working_dates.append(current_date)
-            current_date += pd.Timedelta(days=1)
-        groups = [agent_df.iloc[i*rutas_por_dia:(i+1)*rutas_por_dia] for i in range(required_days)]
-        schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} for date, group in zip(working_dates, groups)]
-    return schedule
-
 def update_provincia():
     st.session_state.municipio = None
     st.session_state.distrito = None
@@ -401,9 +384,11 @@ st.markdown("Esta aplicación utiliza los límites administrativos definidos en 
 
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
+    st.session_state.boundary = None  # Inicializamos boundary en el estado
 
 if st.sidebar.button("Generar asignación"):
     boundary = get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
+    st.session_state.boundary = boundary  # Almacena el boundary en el estado
     if boundary:
         with st.spinner("Consultando Overpass API para obtener calles dentro del perímetro..."):
             streets = get_streets_by_polygon(boundary)
@@ -439,7 +424,8 @@ if st.session_state.resultado:
     else:
         assignments_filtradas = assignments_dict
     
-    mapa_filtrado = create_map(assignments_filtradas, mode, boundary, st.session_state.get("agent_colors", {}))
+    # Se utiliza boundary almacenado en session_state
+    mapa_filtrado = create_map(assignments_filtradas, mode, st.session_state.boundary, st.session_state.get("agent_colors", {}))
     
     st.subheader("Mapa de asignaciones")
     mapa_html = mapa_filtrado._repr_html_()
