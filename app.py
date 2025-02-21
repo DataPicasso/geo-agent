@@ -11,40 +11,45 @@ import numpy as np
 from pyproj import Transformer
 import unicodedata
 
-# -------------------------------
-# Inyectar estilos una sola vez
-# -------------------------------
+# Inicializa variables de session_state si no existen
+if "provincia" not in st.session_state:
+    st.session_state.provincia = "Todos"
+if "municipio" not in st.session_state:
+    st.session_state.municipio = "Todos"
+if "distrito" not in st.session_state:
+    st.session_state.distrito = "Todos"
+if "seccion" not in st.session_state:
+    st.session_state.seccion = "Todos"
+if "barrio" not in st.session_state:
+    st.session_state.barrio = "Todos"
 if "style_loaded" not in st.session_state:
+    st.session_state.style_loaded = False
+if "resultado" not in st.session_state:
+    st.session_state.resultado = None
+
+# Inyectar estilos solo una vez
+if not st.session_state.style_loaded:
     st.markdown(
         """
         <style>
-        /* Fuente y fondo oscuro */
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
         body, .stApp {
             background: linear-gradient(135deg, #121212, #1e1e1e);
             font-family: 'Roboto', sans-serif;
             color: #e0e0e0;
         }
-        
-        /* Barra lateral con fondo oscuro */
         [data-testid="stSidebar"] {
             background: #1a1a1a;
             border: none;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.7);
         }
-        
-        /* Labels en la barra lateral en color claro */
         [data-testid="stSidebar"] label {
             color: #e0e0e0 !important;
             font-weight: 600 !important;
         }
-        
-        /* Encabezados en tonos claros */
         h1, h2, h3, h4, h5, h6 {
             color: #ffffff;
         }
-        
-        /* Botones en la barra lateral y cuerpo principal */
         .stButton > button, .stDownloadButton > button {
             background-color: #333333 !important;
             color: #e0e0e0 !important;
@@ -58,15 +63,11 @@ if "style_loaded" not in st.session_state:
         .stButton > button:hover, .stDownloadButton > button:hover {
             background-color: #444444 !important;
         }
-        
-        /* Tablas y contenedores con fondo oscuro */
         .css-1lcbmhc {
             background-color: #2a2a2a;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
         }
-        
-        /* Pie de página oscuro */
         .footer {
             position: fixed;
             left: 0;
@@ -172,27 +173,27 @@ def filter_feature(geojson_data, value):
 
 def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio):
     boundary = None
-    if selected_barrio and selected_barrio != "Todos":
+    if selected_barrio != "Todos":
         data = load_geojson(BARRIOS_PARAJES_URL)
         feature = filter_feature(data, selected_barrio)
         if feature:
             boundary = feature.get("geometry")
-    if not boundary and selected_secc and selected_secc != "Todos":
+    if not boundary and selected_secc != "Todos":
         data = load_geojson(SECCION_GEOJSON_URL)
         feature = filter_feature(data, selected_secc)
         if feature:
             boundary = feature.get("geometry")
-    if not boundary and selected_dist and selected_dist != "Todos":
+    if not boundary and selected_dist != "Todos":
         data = load_geojson(DISTRITO_GEOJSON_URL)
         feature = filter_feature(data, selected_dist)
         if feature:
             boundary = feature.get("geometry")
-    if not boundary and selected_muni and selected_muni != "Todos":
+    if not boundary and selected_muni != "Todos":
         data = load_geojson(MUNICIPIO_GEOJSON_URL)
         feature = filter_feature(data, selected_muni)
         if feature:
             boundary = feature.get("geometry")
-    if not boundary and selected_prov and selected_prov != "Todos":
+    if not boundary and selected_prov != "Todos":
         boundary = get_province_boundary(selected_prov)
     return boundary
 
@@ -387,6 +388,9 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
         schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} for date, group in zip(working_dates, groups)]
     return schedule
 
+# -------------------------------
+# Eliminamos las funciones on_change (ahora sin reiniciar los selectboxes)
+# -------------------------------
 def update_provincia():
     pass
 
@@ -410,35 +414,32 @@ df_division = load_division_excel()
 # (La lista de Provincia se obtiene de OSM)
 # -------------------------------
 provincias_osm = get_provincias()
-selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias_osm, index=0, key="provincia")
+selected_prov = st.sidebar.selectbox("Seleccione la Provincia:", ["Todos"] + provincias_osm, key="provincia")
 
 if selected_prov != "Todos":
     df_prov = df_division[df_division["Provincia"].apply(normalize_string) == normalize_string(selected_prov)]
 else:
     df_prov = df_division
 municipios_all = sorted(df_prov["Municipio"].dropna().unique().tolist()) if "Municipio" in df_prov.columns else []
-selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios_all, index=0, key="municipio")
+selected_muni = st.sidebar.selectbox("Seleccione el Municipio:", ["Todos"] + municipios_all, key="municipio")
 
 df_muni = df_prov[df_prov["Municipio"] == selected_muni] if selected_prov != "Todos" and selected_muni != "Todos" else df_prov
 distritos_all = sorted(df_muni["Distrito Municipal"].dropna().unique().tolist()) if "Distrito Municipal" in df_muni.columns else []
-selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos_all, index=0, key="distrito")
+selected_dist = st.sidebar.selectbox("Seleccione el Distrito Municipal:", ["Todos"] + distritos_all, key="distrito")
 
 df_dist = df_muni[df_muni["Distrito Municipal"] == selected_dist] if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" else df_muni
 secciones_all = sorted(df_dist["Sección"].dropna().unique().tolist()) if "Sección" in df_dist.columns else []
-selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones_all, index=0, key="seccion")
+selected_secc = st.sidebar.selectbox("Seleccione la Sección:", ["Todos"] + secciones_all, key="seccion")
 
 df_secc = df_dist[df_dist["Sección"] == selected_secc] if selected_prov != "Todos" and selected_muni != "Todos" and selected_dist != "Todos" and selected_secc != "Todos" else df_dist
 barrios_all = sorted(df_secc["Barrio"].dropna().unique().tolist()) if "Barrio" in df_secc.columns else []
-selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios_all, index=0, key="barrio")
+selected_barrio = st.sidebar.selectbox("Seleccione el Barrio:", ["Todos"] + barrios_all, key="barrio")
 
 num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3, step=1)
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
 
 st.title("GEO AGENT 🇩🇴: Organización Inteligente de Rutas en República Dominicana")
 st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área en 🇩🇴 República Dominicana. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
-
-if "resultado" not in st.session_state:
-    st.session_state.resultado = None
 
 if st.sidebar.button("Generar asignación"):
     boundary = get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
