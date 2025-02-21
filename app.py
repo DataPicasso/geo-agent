@@ -121,9 +121,7 @@ def get_distritos(municipio):
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
-# Se mantiene el uso de los GeoJSON para los otros niveles, pero ahora
-# la información de las provincias se obtendrá desde el GeoJSON de provincias en GitHub.
-PROVINCE_GEOJSON_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
+PROVINCE_GEOJSON_URL = "https://github.com/DataPicasso/geo-agent/blob/main/provincias.geojson"
 MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_MUNICIPIOS&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_DM&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 SECCION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_SECCIONES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
@@ -133,14 +131,15 @@ BARRIOS_PARAJES_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&
 # Funciones para cargar y filtrar GeoJSON
 # -------------------------------
 def load_geojson(url):
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
+    response = requests.get(url)
+    if response.status_code == 200:
+        try:
             return response.json()
-        else:
-            st.error(f"Error al cargar GeoJSON desde: {url}")
-    except Exception as e:
-        st.error(f"Excepción al cargar GeoJSON desde: {url}\nError: {e}")
+        except Exception as e:
+            st.error(f"Error al decodificar el GeoJSON de {url}: {e}")
+            return {}
+    else:
+        st.error(f"Error al cargar el GeoJSON desde: {url}")
     return {}
 
 def filter_feature(geojson_data, value):
@@ -173,20 +172,17 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
         if feature:
             boundary = feature.get("geometry")
     if not boundary and selected_prov and selected_prov != "Todos":
-        # Para provincias, se obtiene la información del GeoJSON alojado en GitHub.
-        data = load_geojson(PROVINCE_GEOJSON_URL)
-        # Suponiendo que en este GeoJSON la propiedad para el nombre de la provincia es "name"
-        feature = None
-        for feat in data.get("features", []):
-            if feat.get("properties", {}).get("name", "").strip().upper() == selected_prov.strip().upper():
-                feature = feat
-                break
-        if feature:
-            boundary = feature.get("geometry")
+        boundary = get_province_boundary(selected_prov)
     return boundary
 
 def get_province_boundary(provincia):
-    # Esta función ya no se utiliza para provincias, dado que ahora se toma desde el GeoJSON de GitHub.
+    # Se toma el GeoJSON desde la URL del repositorio para las provincias.
+    data = load_geojson(PROVINCE_GEOJSON_URL)
+    # Se asume que en el GeoJSON la propiedad que identifica la provincia es "name".
+    for feature in data.get("features", []):
+        props = feature.get("properties", {})
+        if "name" in props and props["name"].strip().upper() == provincia.strip().upper():
+            return feature.get("geometry")
     return None
 
 def build_overpass_query_polygon(geometry):
@@ -194,11 +190,20 @@ def build_overpass_query_polygon(geometry):
         geometry = {"type": "Polygon", "coordinates": geometry["coordinates"][0]}
     if geometry["type"] != "Polygon":
         return ""
-    transformer = Transformer.from_crs("EPSG:32619", "EPSG:4326", always_xy=True)
+    # Verificar si las coordenadas ya están en EPSG:4326
+    first_coord = geometry["coordinates"][0][0]
+    lon, lat = first_coord
     coords = []
-    for coord in geometry["coordinates"][0]:
-        lon, lat = transformer.transform(coord[0], coord[1])
-        coords.append(f"{lat} {lon}")
+    if -90 <= lat <= 90 and -180 <= lon <= 180:
+        # Las coordenadas ya están en EPSG:4326
+        for coord in geometry["coordinates"][0]:
+            coords.append(f"{coord[1]} {coord[0]}")
+    else:
+        # Transformar desde EPSG:32619 a EPSG:4326
+        transformer = Transformer.from_crs("EPSG:32619", "EPSG:4326", always_xy=True)
+        for coord in geometry["coordinates"][0]:
+            lon_t, lat_t = transformer.transform(coord[0], coord[1])
+            coords.append(f"{lat_t} {lon_t}")
     poly_string = " ".join(coords)
     query = f"""
     [out:json][timeout:25];
@@ -213,18 +218,18 @@ def get_streets_by_polygon(boundary):
     url = "http://overpass-api.de/api/interpreter"
     query = build_overpass_query_polygon(boundary)
     if not query:
-        st.error("La geometría no es un polígono válido para la consulta.")
         return None
     try:
         response = requests.post(url, data={'data': query})
         data = response.json()
     except Exception as e:
-        st.error(f"Error al decodificar la respuesta JSON: {e}\nRespuesta recibida: {response.text if response is not None else 'No response'}")
+        st.error(f"Error al obtener o decodificar respuesta de Overpass API: {e}")
         return None
-    if not data.get("elements"):
-        st.error(f"No se encontraron calles. Query ejecutada:\n{query}\nRespuesta recibida:\n{response.text}")
+    if data.get("elements"):
+        return data["elements"]
+    else:
+        st.warning("No se encontraron calles en el perímetro especificado.")
         return None
-    return data["elements"]
 
 # -------------------------------
 # Funciones para asignación, clustering y mapeo
@@ -300,8 +305,12 @@ def create_map(assignments, mode, boundary, agent_colors):
             for street in streets_ordered:
                 if "geometry" in street:
                     coords = [(pt["lat"], pt["lon"]) for pt in street["geometry"]]
-                    folium.PolyLine(coords, color=agent_colors.get(agent, "#000000"), weight=4,
-                                    tooltip=street.get("tags", {}).get("name", "Sin nombre")).add_to(feature_group)
+                    folium.PolyLine(
+                        coords,
+                        color=agent_colors.get(agent, "#000000"),
+                        weight=4,
+                        tooltip=street.get("tags", {}).get("name", "Sin nombre")
+                    ).add_to(feature_group)
         elif mode == "Área":
             points = []
             for street in streets_ordered:
@@ -313,8 +322,18 @@ def create_map(assignments, mode, boundary, agent_colors):
                     polygon = MultiPoint(points).convex_hull
                     if isinstance(polygon, Polygon):
                         folium.GeoJson(
-                            data={"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [list(polygon.exterior.coords)]}},
-                            style_function=lambda x, col=agent_colors.get(agent, "#000000"): {"fillColor": col, "color": col, "fillOpacity": 0.4}
+                            data={
+                                "type": "Feature",
+                                "geometry": {
+                                    "type": "Polygon",
+                                    "coordinates": [list(polygon.exterior.coords)]
+                                }
+                            },
+                            style_function=lambda x, col=agent_colors.get(agent, "#000000"): {
+                                "fillColor": col,
+                                "color": col,
+                                "fillOpacity": 0.4
+                            }
                         ).add_to(feature_group)
                 except Exception:
                     pass
@@ -346,7 +365,27 @@ def generate_dataframe(assignments, selected_prov, selected_muni, selected_dist,
             })
     return pd.DataFrame(rows)
 
-# Funciones de actualización para los filtros en cascada
+def generate_schedule(df, working_days, start_date, rutas_por_dia):
+    schedule = {}
+    for agent in sorted(df["Agente"].unique()):
+        agent_df = df[df["Agente"] == agent].copy()
+        if "Order" in agent_df.columns:
+            agent_df = agent_df.sort_values("Order")
+        else:
+            agent_df = agent_df.reset_index(drop=True)
+        total_routes = len(agent_df)
+        required_days = int(np.ceil(total_routes / rutas_por_dia))
+        working_dates = []
+        current_date = pd.to_datetime(start_date)
+        while len(working_dates) < required_days:
+            if current_date.strftime("%A") in working_days:
+                working_dates.append(current_date)
+            current_date += pd.Timedelta(days=1)
+        groups = [agent_df.iloc[i*rutas_por_dia:(i+1)*rutas_por_dia] for i in range(required_days)]
+        schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} 
+                           for date, group in zip(working_dates, groups)]
+    return schedule
+
 def update_provincia():
     st.session_state.municipio = None
     st.session_state.distrito = None
@@ -397,7 +436,7 @@ if "resultado" not in st.session_state:
 
 if st.sidebar.button("Generar asignación"):
     boundary = get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
-    st.session_state.boundary = boundary  # Almacena el boundary en el estado de sesión
+    st.session_state.boundary = boundary  # Almacena el boundary en el state
     if boundary:
         with st.spinner("Consultando Overpass API para obtener calles dentro del perímetro..."):
             streets = get_streets_by_polygon(boundary)
