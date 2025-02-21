@@ -141,6 +141,9 @@ def filter_feature(geojson_data, value):
         props = feature.get("properties", {})
         if "TOPONIMIA" in props and props["TOPONIMIA"].strip().upper() == value.strip().upper():
             return feature
+        # Si la propiedad 'name' está presente, también se puede comparar con ella
+        if "name" in props and props["name"].strip().upper() == value.strip().upper():
+            return feature
     return None
 
 def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio):
@@ -169,24 +172,15 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
         boundary = get_province_boundary(selected_prov)
     return boundary
 
+# Aquí se reemplaza la consulta a Overpass por la carga del GeoJSON de provincias desde GitHub
 def get_province_boundary(provincia):
-    query = f"""
-    [out:json][timeout:25];
-    area["name"="🇩🇴 República Dominicana"]->.country;
-    area["name"="{provincia}"](area.country)->.provincia;
-    (
-      relation(area.provincia)["boundary"="administrative"]["admin_level"="4"];
-    );
-    out geom;
-    """
-    url = "http://overpass-api.de/api/interpreter"
-    response = requests.post(url, data={'data': query})
-    data = response.json()
-    if data.get("elements"):
-        element = data["elements"][0]
-        if "geometry" in element:
-            coords = [(pt["lon"], pt["lat"]) for pt in element["geometry"]]
-            return {"type": "Polygon", "coordinates": [coords]}
+    url = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
+    data = load_geojson(url)
+    # Se compara la propiedad "name" (o "TOPONIMIA" si fuera el caso) con el valor de la provincia
+    for feature in data.get("features", []):
+        props = feature.get("properties", {})
+        if "name" in props and props["name"].strip().upper() == provincia.strip().upper():
+            return feature.get("geometry")
     return None
 
 def build_overpass_query_polygon(geometry):
