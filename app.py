@@ -12,82 +12,84 @@ from pyproj import Transformer
 import unicodedata
 
 # -------------------------------
+# Inyectar estilos una sola vez
+# -------------------------------
+if "style_loaded" not in st.session_state:
+    st.markdown(
+        """
+        <style>
+        /* Fuente y fondo oscuro */
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+        body, .stApp {
+            background: linear-gradient(135deg, #121212, #1e1e1e);
+            font-family: 'Roboto', sans-serif;
+            color: #e0e0e0;
+        }
+        
+        /* Barra lateral con fondo oscuro */
+        [data-testid="stSidebar"] {
+            background: #1a1a1a;
+            border: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.7);
+        }
+        
+        /* Labels en la barra lateral en color claro */
+        [data-testid="stSidebar"] label {
+            color: #e0e0e0 !important;
+            font-weight: 600 !important;
+        }
+        
+        /* Encabezados en tonos claros */
+        h1, h2, h3, h4, h5, h6 {
+            color: #ffffff;
+        }
+        
+        /* Botones en la barra lateral y cuerpo principal */
+        .stButton > button, .stDownloadButton > button {
+            background-color: #333333 !important;
+            color: #e0e0e0 !important;
+            border-radius: 8px !important;
+            border: none !important;
+            font-size: 16px !important;
+            font-weight: 500 !important;
+            padding: 10px 20px !important;
+            transition: background-color 0.3s ease;
+        }
+        .stButton > button:hover, .stDownloadButton > button:hover {
+            background-color: #444444 !important;
+        }
+        
+        /* Tablas y contenedores con fondo oscuro */
+        .css-1lcbmhc {
+            background-color: #2a2a2a;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
+        }
+        
+        /* Pie de página oscuro */
+        .footer {
+            position: fixed;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            background-color: #1e1e1e;
+            text-align: center;
+            padding: 10px 0;
+            font-size: 14px;
+            color: #e0e0e0;
+            border-top: 1px solid #333333;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    st.session_state.style_loaded = True
+
+# -------------------------------
 # Función de normalización de cadenas
 # -------------------------------
 def normalize_string(s):
     return unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('ASCII').upper()
-
-# -------------------------------
-# Estilos personalizados (tema oscuro)
-# -------------------------------
-st.markdown(
-    """
-    <style>
-    /* Fuente y fondo oscuro */
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
-    body, .stApp {
-        background: linear-gradient(135deg, #121212, #1e1e1e);
-        font-family: 'Roboto', sans-serif;
-        color: #e0e0e0;
-    }
-    
-    /* Barra lateral con fondo oscuro */
-    [data-testid="stSidebar"] {
-        background: #1a1a1a;
-        border: none;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.7);
-    }
-    
-    /* Labels en la barra lateral en color claro */
-    [data-testid="stSidebar"] label {
-        color: #e0e0e0 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Encabezados en tonos claros */
-    h1, h2, h3, h4, h5, h6 {
-        color: #ffffff;
-    }
-    
-    /* Botones en la barra lateral y cuerpo principal */
-    .stButton > button, .stDownloadButton > button {
-        background-color: #333333 !important;
-        color: #e0e0e0 !important;
-        border-radius: 8px !important;
-        border: none !important;
-        font-size: 16px !important;
-        font-weight: 500 !important;
-        padding: 10px 20px !important;
-        transition: background-color 0.3s ease;
-    }
-    .stButton > button:hover, .stDownloadButton > button:hover {
-        background-color: #444444 !important;
-    }
-    
-    /* Tablas y contenedores con fondo oscuro */
-    .css-1lcbmhc {
-        background-color: #2a2a2a;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
-    }
-    
-    /* Pie de página oscuro */
-    .footer {
-        position: fixed;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        background-color: #1e1e1e;
-        text-align: center;
-        padding: 10px 0;
-        font-size: 14px;
-        color: #e0e0e0;
-        border-top: 1px solid #333333;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 
 # -------------------------------
 # Funciones para obtener datos de OSM (Overpass API)
@@ -106,7 +108,7 @@ def get_provincias():
     mapping = {}
     for name in raw:
         norm = normalize_string(name)
-        mapping[norm] = name  # Mapea la versión normalizada a la original
+        mapping[norm] = name
     sorted_norm = sorted(mapping.keys())
     return [mapping[n] for n in sorted_norm]
 
@@ -385,11 +387,8 @@ def generate_schedule(df, working_days, start_date, rutas_por_dia):
         schedule[agent] = [{"Date": date.strftime("%Y-%m-%d"), "Calles": group["Calle"].tolist()} for date, group in zip(working_dates, groups)]
     return schedule
 
-# -------------------------------
-# Funciones de actualización (ahora sin on_change que reinicien todo)
-# -------------------------------
 def update_provincia():
-    pass  # Se elimina la lógica que reiniciaba los valores
+    pass
 
 def update_municipio():
     pass
