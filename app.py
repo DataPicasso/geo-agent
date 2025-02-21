@@ -121,29 +121,30 @@ def get_distritos(municipio):
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
-# Se mantienen las URLs para municipios, distritos, secciones y barrios
+PROVINCE_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_PROV&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_MUNICIPIOS&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_DM&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 SECCION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_SECCIONES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 BARRIOS_PARAJES_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_BPARAJES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 
-# Nuevo: URL para el GeoJSON de provincias (usamos la URL raw de GitHub)
-PROVINCE_GEOJSON_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
-
 # -------------------------------
 # Funciones para cargar y filtrar GeoJSON
 # -------------------------------
 def load_geojson(url):
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al cargar GeoJSON desde: {url}")
+    except Exception as e:
+        st.error(f"Excepción al cargar GeoJSON desde: {url}\nError: {e}")
     return {}
 
 def filter_feature(geojson_data, value):
     for feature in geojson_data.get("features", []):
         props = feature.get("properties", {})
-        # Se asume que en el GeoJSON de provincias la propiedad a comparar es "name"
-        if "name" in props and props["name"].strip().upper() == value.strip().upper():
+        if "TOPONIMIA" in props and props["TOPONIMIA"].strip().upper() == value.strip().upper():
             return feature
     return None
 
@@ -174,16 +175,23 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
     return boundary
 
 def get_province_boundary(provincia):
-    # Se carga el GeoJSON de provincias desde el repositorio y se busca la feature correspondiente
-    data = load_geojson(PROVINCE_GEOJSON_URL)
-    feature = filter_feature(data, provincia)
-    if feature:
-        geometry = feature.get("geometry")
-        # Si la geometría es MultiPolygon, se toma el primer polígono
-        if geometry["type"] == "MultiPolygon":
-            geometry = {"type": "Polygon", "coordinates": geometry["coordinates"][0]}
-        if geometry["type"] == "Polygon":
-            return geometry
+    query = f"""
+    [out:json][timeout:25];
+    area["name"="🇩🇴 República Dominicana"]->.country;
+    area["name"="{provincia}"](area.country)->.provincia;
+    (
+      relation(area.provincia)["boundary"="administrative"]["admin_level"="4"];
+    );
+    out geom;
+    """
+    url = "http://overpass-api.de/api/interpreter"
+    response = requests.post(url, data={'data': query})
+    data = response.json()
+    if data.get("elements"):
+        element = data["elements"][0]
+        if "geometry" in element:
+            coords = [(pt["lon"], pt["lat"]) for pt in element["geometry"]]
+            return {"type": "Polygon", "coordinates": [coords]}
     return None
 
 def build_overpass_query_polygon(geometry):
@@ -211,8 +219,12 @@ def get_streets_by_polygon(boundary):
     query = build_overpass_query_polygon(boundary)
     if not query:
         return None
-    response = requests.post(url, data={'data': query})
-    data = response.json()
+    try:
+        response = requests.post(url, data={'data': query})
+        data = response.json()
+    except Exception as e:
+        st.error(f"Error al decodificar la respuesta JSON: {e}\nRespuesta recibida: {response.text}")
+        return None
     if data.get("elements"):
         return data["elements"]
     return None
@@ -337,6 +349,7 @@ def generate_dataframe(assignments, selected_prov, selected_muni, selected_dist,
             })
     return pd.DataFrame(rows)
 
+# Funciones de actualización para los filtros en cascada
 def update_provincia():
     st.session_state.municipio = None
     st.session_state.distrito = None
@@ -384,11 +397,10 @@ st.markdown("Esta aplicación utiliza los límites administrativos definidos en 
 
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
-    st.session_state.boundary = None  # Inicializamos boundary en el estado
 
 if st.sidebar.button("Generar asignación"):
     boundary = get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
-    st.session_state.boundary = boundary  # Almacena el boundary en el estado
+    st.session_state.boundary = boundary  # Almacena el boundary en el estado de sesión
     if boundary:
         with st.spinner("Consultando Overpass API para obtener calles dentro del perímetro..."):
             streets = get_streets_by_polygon(boundary)
@@ -424,7 +436,6 @@ if st.session_state.resultado:
     else:
         assignments_filtradas = assignments_dict
     
-    # Se utiliza boundary almacenado en session_state
     mapa_filtrado = create_map(assignments_filtradas, mode, st.session_state.boundary, st.session_state.get("agent_colors", {}))
     
     st.subheader("Mapa de asignaciones")
