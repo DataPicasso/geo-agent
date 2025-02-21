@@ -8,19 +8,17 @@ from io import BytesIO  # Para el manejo del Excel en memoria
 from sklearn.cluster import KMeans
 from geopy.distance import geodesic
 import numpy as np
-#from pyproj import Transformer  # Ya no se usa la transformación
+from pyproj import Transformer
 import unicodedata
 
 # -------------------------------
-# Función para normalizar cadenas (quita acentos, espacios y pasa a mayúsculas)
+# Función para normalizar cadenas (eliminar acentos y pasar a minúsculas)
 # -------------------------------
 def normalize_str(s):
-    if not isinstance(s, str):
-        return ""
-    s = s.strip()
-    s = unicodedata.normalize('NFD', s)
-    s = s.encode('ascii', 'ignore').decode('utf-8')
-    return s.upper()
+    return ''.join(
+        c for c in unicodedata.normalize('NFKD', s)
+        if not unicodedata.combining(c)
+    ).lower().strip()
 
 # -------------------------------
 # Estilos personalizados (tema oscuro)
@@ -35,21 +33,25 @@ st.markdown(
         font-family: 'Roboto', sans-serif;
         color: #e0e0e0;
     }
+    
     /* Barra lateral con fondo oscuro */
     [data-testid="stSidebar"] {
         background: #1a1a1a;
         border: none;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.7);
     }
+    
     /* Labels en la barra lateral en color claro */
     [data-testid="stSidebar"] label {
         color: #e0e0e0 !important;
         font-weight: 600 !important;
     }
+    
     /* Encabezados en tonos claros */
     h1, h2, h3, h4, h5, h6 {
         color: #ffffff;
     }
+    
     /* Botones en la barra lateral y cuerpo principal */
     .stButton > button, .stDownloadButton > button {
         background-color: #333333 !important;
@@ -64,12 +66,14 @@ st.markdown(
     .stButton > button:hover, .stDownloadButton > button:hover {
         background-color: #444444 !important;
     }
+    
     /* Tablas y contenedores con fondo oscuro */
     .css-1lcbmhc {
         background-color: #2a2a2a;
         border-radius: 8px;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
     }
+    
     /* Pie de página oscuro */
     .footer {
         position: fixed;
@@ -93,10 +97,12 @@ st.markdown(
 # (Para Municipio y Distrito)
 # -------------------------------
 def get_municipios(provincia):
+    # Normalizamos el nombre de la provincia para la consulta
+    provincia_norm = normalize_str(provincia)
     query = f"""
     [out:json];
     area["name"="República Dominicana"]->.country;
-    area["name"="{provincia}"](area.country)->.provincia;
+    area["name"="{provincia_norm}"](area.country)->.provincia;
     rel(area.provincia)["admin_level"="8"]["boundary"="administrative"];
     out tags;
     """
@@ -107,16 +113,20 @@ def get_municipios(provincia):
     except Exception as e:
         st.error(f"Error al decodificar respuesta de Overpass API: {e}")
         return []
-    municipios = [element.get("tags", {}).get("name") for element in data.get("elements", []) if element.get("tags", {}).get("name")]
-    return sorted(list(set(municipios)))
+    municipios = [element.get("tags", {}).get("name") 
+                  for element in data.get("elements", []) 
+                  if element.get("tags", {}).get("name")]
+    # Estandarizamos los nombres para ordenarlos
+    return sorted(list(set(municipios)), key=lambda s: normalize_str(s))
 
 def get_distritos(municipio):
+    municipio_norm = normalize_str(municipio)
     query = f"""
     [out:json];
     area["name"="República Dominicana"]->.country;
-    rel(area.country)["name"="{municipio}"]["admin_level"="8"];
+    rel(area.country)["name"="{municipio_norm}"]["admin_level"="8"];
     out tags;
-    area["name"="{municipio}"]->.municipio;
+    area["name"="{municipio_norm}"]->.municipio;
     rel(area.municipio)["admin_level"="9"]["boundary"="administrative"];
     out tags;
     """
@@ -127,17 +137,18 @@ def get_distritos(municipio):
     except Exception as e:
         st.error(f"Error al decodificar respuesta de Overpass API: {e}")
         return []
-    distritos = [element.get("tags", {}).get("name") for element in data.get("elements", []) if element.get("tags", {}).get("name")]
-    return sorted(list(set(distritos)))
+    distritos = [element.get("tags", {}).get("name") 
+                 for element in data.get("elements", []) 
+                 if element.get("tags", {}).get("name")]
+    return sorted(list(set(distritos)), key=lambda s: normalize_str(s))
 
 # -------------------------------
 # Constantes para GeoJSON y archivo Excel de división territorial
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
-# Para provincias, se usa el GeoJSON desde GitHub
+# Usamos el GeoJSON de provincias de nuestro repositorio para obtener el perímetro de las provincias
 PROVINCE_GEOJSON_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
-
 MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_MUNICIPIOS&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_DM&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 SECCION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_SECCIONES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
@@ -149,20 +160,23 @@ BARRIOS_PARAJES_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&
 def load_geojson(url):
     try:
         response = requests.get(url)
-        response.raise_for_status()
-        return response.json()
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Error al cargar GeoJSON desde: {url} (Código {response.status_code})")
     except Exception as e:
-        st.error(f"Error al cargar o decodificar el GeoJSON de {url}: {e}")
-        return {}
+        st.error(f"Excepción al cargar GeoJSON: {e}")
+    return {}
 
 def filter_feature(geojson_data, value):
-    norm_value = normalize_str(value)
+    target = normalize_str(value)
     for feature in geojson_data.get("features", []):
         props = feature.get("properties", {})
-        # Se asume que la propiedad clave es "TOPONIMIA". Se normaliza para comparar.
+        # Usamos la propiedad "TOPONIMIA" si existe
         if "TOPONIMIA" in props:
-            if normalize_str(props["TOPONIMIA"]) == norm_value:
+            if normalize_str(str(props["TOPONIMIA"])) == target:
                 return feature
+        # También se puede considerar otras propiedades, si fuera necesario
     return None
 
 def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio):
@@ -188,7 +202,7 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
         if feature:
             boundary = feature.get("geometry")
     if not boundary and selected_prov and selected_prov != "Todos":
-        # Para la provincia, usamos el GeoJSON de provincias
+        # Para la provincia usamos el GeoJSON de provincias de nuestro repositorio
         data = load_geojson(PROVINCE_GEOJSON_URL)
         feature = filter_feature(data, selected_prov)
         if feature:
@@ -196,17 +210,14 @@ def get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, sel
     return boundary
 
 def build_overpass_query_polygon(geometry):
-    # Si la geometría es MultiPolygon, usamos el primer polígono
     if geometry["type"] == "MultiPolygon":
         geometry = {"type": "Polygon", "coordinates": geometry["coordinates"][0]}
     if geometry["type"] != "Polygon":
         return ""
-    # Asumimos que el GeoJSON está en EPSG:4326, así que usamos las coordenadas tal como vienen.
+    transformer = Transformer.from_crs("EPSG:32619", "EPSG:4326", always_xy=True)
     coords = []
     for coord in geometry["coordinates"][0]:
-        # coord: [lon, lat]
-        lat = coord[1]
-        lon = coord[0]
+        lon, lat = transformer.transform(coord[0], coord[1])
         coords.append(f"{lat} {lon}")
     poly_string = " ".join(coords)
     query = f"""
@@ -222,18 +233,19 @@ def get_streets_by_polygon(boundary):
     url = "http://overpass-api.de/api/interpreter"
     query = build_overpass_query_polygon(boundary)
     if not query:
+        st.error("La geometría no es un polígono válido para la consulta.")
         return None
     try:
         response = requests.post(url, data={'data': query})
         response.raise_for_status()
         data = response.json()
-        if data.get("elements"):
-            return data["elements"]
-        else:
-            st.warning("No se encontraron calles en el perímetro especificado.")
-            return None
     except Exception as e:
         st.error(f"Error al consultar Overpass API con el perímetro: {e}")
+        return None
+    if data.get("elements"):
+        return data["elements"]
+    else:
+        st.warning("No se encontraron calles en el perímetro especificado.")
         return None
 
 # -------------------------------
@@ -257,7 +269,7 @@ def assign_streets_cluster(streets, num_agents):
     data = np.array(data)
     kmeans = KMeans(n_clusters=num_agents, n_init=10, random_state=42).fit(data)
     labels = kmeans.labels_
-    assignments = {i: [] for i in range(num_agents)}
+    assignments = { i: [] for i in range(num_agents) }
     for label, idx in zip(labels, indices):
         assignments[label].append(streets[idx])
     return assignments
@@ -340,8 +352,8 @@ def create_map(assignments, mode, boundary, agent_colors):
                                 "fillOpacity": 0.4
                             }
                         ).add_to(feature_group)
-                except Exception:
-                    pass
+                except Exception as e:
+                    st.error(f"Error al calcular el área para el Agente {agent+1}: {e}")
         feature_group.add_to(m)
     folium.LayerControl().add_to(m)
     return m
@@ -384,7 +396,8 @@ def update_municipio():
 def load_division_excel():
     try:
         return pd.read_excel(DIVISION_XLSX_URL)
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al cargar el archivo Excel: {e}")
         return pd.DataFrame()
 
 df_division = load_division_excel()
@@ -413,14 +426,14 @@ num_agents = st.sidebar.number_input("Número de agentes:", min_value=1, value=3
 mode = st.sidebar.radio("Modo de visualización del mapa:", options=["Calles", "Área"])
 
 st.title("GEO AGENT 🇩🇴: Organización Inteligente de Rutas en República Dominicana")
-st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia (obtenida desde el GeoJSON de provincias) para filtrar dinámicamente el área en 🇩🇴 República Dominicana. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
+st.markdown("Esta aplicación utiliza los límites administrativos definidos en GeoJSON (para Municipio, Distrito, Sección y Barrio) y la ubicación geoespacial de la Provincia obtenida de OpenStreetMap para filtrar dinámicamente el área en 🇩🇴 República Dominicana. Se extraen las calles desde OpenStreetMap dentro del perímetro seleccionado.")
 
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
 
 if st.sidebar.button("Generar asignación"):
     boundary = get_boundary(selected_prov, selected_muni, selected_dist, selected_secc, selected_barrio)
-    st.session_state.boundary = boundary  # Almacena el boundary en el session_state
+    st.session_state.boundary = boundary  # Almacena el boundary en el estado de la sesión
     if boundary:
         with st.spinner("Consultando Overpass API para obtener calles dentro del perímetro..."):
             streets = get_streets_by_polygon(boundary)
@@ -456,8 +469,7 @@ if st.session_state.resultado:
     else:
         assignments_filtradas = assignments_dict
     
-    current_boundary = st.session_state.get("boundary", None)
-    mapa_filtrado = create_map(assignments_filtradas, mode, current_boundary, st.session_state.get("agent_colors", {}))
+    mapa_filtrado = create_map(assignments_filtradas, mode, st.session_state.boundary, st.session_state.get("agent_colors", {}))
     
     st.subheader("Mapa de asignaciones")
     mapa_html = mapa_filtrado._repr_html_()
