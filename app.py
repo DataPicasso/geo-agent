@@ -121,7 +121,7 @@ def get_distritos(municipio):
 # -------------------------------
 DIVISION_XLSX_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/division_territorial.xlsx"
 
-PROVINCE_GEOJSON_URL = "https://github.com/DataPicasso/geo-agent/blob/main/provincias.geojson"
+PROVINCE_GEOJSON_URL = "https://raw.githubusercontent.com/DataPicasso/geo-agent/main/provincias.geojson"
 MUNICIPIO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_MUNICIPIOS&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 DISTRITO_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_DM&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
 SECCION_GEOJSON_URL = "https://geoportal.iderd.gob.do/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typename=geonode%3ARD_SECCIONES&outputFormat=json&srs=EPSG%3A32619&srsName=EPSG%3A32619"
